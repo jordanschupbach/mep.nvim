@@ -1,0 +1,144 @@
+--- Curated registry of common tree-sitter grammars: enough to cover most
+--- everyday editing without trying to be the ~200+-language catalogue
+--- nvim-treesitter maintains.
+---
+--- Each entry's `url`/`files`/`location`/`branch` was verified against
+--- nvim-treesitter's own registry (lua/nvim-treesitter/parsers.lua) at
+--- write time, not guessed from memory — several of these have moved
+--- orgs over time (e.g. lua, markdown, yaml, toml, vim/vimdoc are *not*
+--- under github.com/tree-sitter), and typescript/tsx/php/markdown build
+--- from a `location` subdirectory of a shared repo rather than their own.
+---
+--- `files` are C source paths relative to the repo root (or `location`,
+--- if set); `branch`, if set, is checked out instead of the repo's
+--- default branch.
+local M = {}
+
+M.registry = {
+  lua = {
+    url = 'https://github.com/MunifTanjim/tree-sitter-lua',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  python = {
+    url = 'https://github.com/tree-sitter/tree-sitter-python',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  javascript = {
+    url = 'https://github.com/tree-sitter/tree-sitter-javascript',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  typescript = {
+    url = 'https://github.com/tree-sitter/tree-sitter-typescript',
+    files = { 'src/parser.c', 'src/scanner.c' },
+    location = 'typescript',
+  },
+  tsx = {
+    url = 'https://github.com/tree-sitter/tree-sitter-typescript',
+    files = { 'src/parser.c', 'src/scanner.c' },
+    location = 'tsx',
+  },
+  go = {
+    url = 'https://github.com/tree-sitter/tree-sitter-go',
+    files = { 'src/parser.c' },
+  },
+  rust = {
+    url = 'https://github.com/tree-sitter/tree-sitter-rust',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  java = {
+    url = 'https://github.com/tree-sitter/tree-sitter-java',
+    files = { 'src/parser.c' },
+  },
+  ruby = {
+    url = 'https://github.com/tree-sitter/tree-sitter-ruby',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  c = {
+    url = 'https://github.com/tree-sitter/tree-sitter-c',
+    files = { 'src/parser.c' },
+  },
+  cpp = {
+    url = 'https://github.com/tree-sitter/tree-sitter-cpp',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  c_sharp = {
+    url = 'https://github.com/tree-sitter/tree-sitter-c-sharp',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  bash = {
+    url = 'https://github.com/tree-sitter/tree-sitter-bash',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  json = {
+    url = 'https://github.com/tree-sitter/tree-sitter-json',
+    files = { 'src/parser.c' },
+  },
+  yaml = {
+    url = 'https://github.com/tree-sitter-grammars/tree-sitter-yaml',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  toml = {
+    url = 'https://github.com/tree-sitter-grammars/tree-sitter-toml',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  html = {
+    url = 'https://github.com/tree-sitter/tree-sitter-html',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  css = {
+    url = 'https://github.com/tree-sitter/tree-sitter-css',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  markdown = {
+    url = 'https://github.com/MDeiml/tree-sitter-markdown',
+    files = { 'src/parser.c', 'src/scanner.c' },
+    location = 'tree-sitter-markdown',
+  },
+  markdown_inline = {
+    url = 'https://github.com/MDeiml/tree-sitter-markdown',
+    files = { 'src/parser.c', 'src/scanner.c' },
+    location = 'tree-sitter-markdown-inline',
+  },
+  sql = {
+    url = 'https://github.com/derekstride/tree-sitter-sql',
+    files = { 'src/parser.c', 'src/scanner.c' },
+    branch = 'gh-pages',
+  },
+  php = {
+    url = 'https://github.com/tree-sitter/tree-sitter-php',
+    files = { 'src/parser.c', 'src/scanner.c' },
+    location = 'php',
+  },
+  vim = {
+    url = 'https://github.com/neovim/tree-sitter-vim',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  vimdoc = {
+    url = 'https://github.com/neovim/tree-sitter-vimdoc',
+    files = { 'src/parser.c' },
+  },
+  query = {
+    url = 'https://github.com/nvim-treesitter/tree-sitter-query',
+    files = { 'src/parser.c' },
+  },
+  dockerfile = {
+    url = 'https://github.com/camdencheek/tree-sitter-dockerfile',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  org = {
+    url = 'https://github.com/nvim-orgmode/tree-sitter-org',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+}
+
+--- Names of every parser in the curated registry, sorted.
+function M.names()
+  local names = {}
+  for name in pairs(M.registry) do
+    names[#names + 1] = name
+  end
+  table.sort(names)
+  return names
+end
+
+return M

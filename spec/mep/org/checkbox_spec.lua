@@ -1,0 +1,70 @@
+local checkbox = require('mep.org.checkbox')
+
+local function make_buf(line)
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { line })
+  return buf
+end
+
+describe('mep.org.checkbox', function()
+  describe('is_checkbox', function()
+    it('recognizes -, +, and * bullet checkboxes, checked or not', function()
+      assert.is_true(checkbox.is_checkbox('- [ ] todo'))
+      assert.is_true(checkbox.is_checkbox('+ [x] done'))
+      assert.is_true(checkbox.is_checkbox('* [X] done'))
+    end)
+
+    it('rejects a plain list item with no checkbox', function()
+      assert.is_false(checkbox.is_checkbox('- just a list item'))
+    end)
+  end)
+
+  describe('is_checked', function()
+    it('returns true for a checked box (uppercase or lowercase x)', function()
+      assert.is_true(checkbox.is_checked('- [X] done'))
+      assert.is_true(checkbox.is_checked('- [x] done'))
+    end)
+
+    it('returns false for an unchecked box', function()
+      assert.is_false(checkbox.is_checked('- [ ] todo'))
+    end)
+
+    it('returns nil for a non-checkbox line', function()
+      assert.is_nil(checkbox.is_checked('just a line'))
+    end)
+  end)
+
+  describe('toggle', function()
+    it('checks an unchecked box', function()
+      local buf = make_buf('- [ ] buy milk')
+      local checked = checkbox.toggle(buf, 1)
+      assert.is_true(checked)
+      assert.are.equal('- [X] buy milk', vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1])
+    end)
+
+    it('unchecks a checked box (uppercase X)', function()
+      local buf = make_buf('- [X] buy milk')
+      local checked = checkbox.toggle(buf, 1)
+      assert.is_false(checked)
+      assert.are.equal('- [ ] buy milk', vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1])
+    end)
+
+    it('unchecks a checked box (lowercase x)', function()
+      local buf = make_buf('- [x] buy milk')
+      checkbox.toggle(buf, 1)
+      assert.are.equal('- [ ] buy milk', vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1])
+    end)
+
+    it('preserves indentation and trailing text', function()
+      local buf = make_buf('  - [ ] nested item with :tags:')
+      checkbox.toggle(buf, 1)
+      assert.are.equal('  - [X] nested item with :tags:', vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1])
+    end)
+
+    it('returns nil and does nothing for a non-checkbox line', function()
+      local buf = make_buf('just a line')
+      assert.is_nil(checkbox.toggle(buf, 1))
+      assert.are.equal('just a line', vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1])
+    end)
+  end)
+end)

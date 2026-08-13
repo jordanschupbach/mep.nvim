@@ -1,0 +1,90 @@
+local export = require('mep.org.export')
+local markdown = require('mep.org.export.markdown')
+
+local function render(lines)
+  local doc = export.parse_lines(lines, { todo_keywords = { 'TODO', 'DONE' } })
+  return markdown.render(doc)
+end
+
+describe('mep.org.export.markdown', function()
+  it('maps headline level directly to # count', function()
+    local out = render({ '* One', '** Two', '*** Three' })
+    assert.is_true(vim.tbl_contains(out, '# One'))
+    assert.is_true(vim.tbl_contains(out, '## Two'))
+    assert.is_true(vim.tbl_contains(out, '### Three'))
+  end)
+
+  it('clamps headline level to 6 #s', function()
+    local out = render({ '******* Deep' })
+    assert.is_true(vim.tbl_contains(out, '###### Deep'))
+  end)
+
+  it('renders bold as **text**', function()
+    local out = render({ 'a *bold* word' })
+    assert.is_true(vim.tbl_contains(out, 'a **bold** word'))
+  end)
+
+  it('renders italic as _text_', function()
+    local out = render({ 'a /it/ word' })
+    assert.is_true(vim.tbl_contains(out, 'a _it_ word'))
+  end)
+
+  it('renders strike as ~~text~~', function()
+    local out = render({ 'a +gone+ word' })
+    assert.is_true(vim.tbl_contains(out, 'a ~~gone~~ word'))
+  end)
+
+  it('renders a link as [desc](target)', function()
+    local out = render({ 'see [[https://x.com][X]] now' })
+    assert.is_true(vim.tbl_contains(out, 'see [X](https://x.com) now'))
+  end)
+
+  it('renders a checkbox item', function()
+    local out = render({ '- [X] done' })
+    assert.is_true(vim.tbl_contains(out, '- [x] done'))
+  end)
+
+  it('renders an ordered list numbered from 1', function()
+    local out = render({ '1. a', '1. b' })
+    assert.is_true(vim.tbl_contains(out, '1. a'))
+    assert.is_true(vim.tbl_contains(out, '2. b'))
+  end)
+
+  it('renders a nested list item indented 2 spaces per depth', function()
+    local out = render({ '- top', '  - nested' })
+    assert.is_true(vim.tbl_contains(out, '  - nested'))
+  end)
+
+  it('fences a src block with the language', function()
+    local out = render({ '#+begin_src python', 'print(1)', '#+end_src' })
+    assert.is_true(vim.tbl_contains(out, '```python'))
+    assert.is_true(vim.tbl_contains(out, 'print(1)'))
+  end)
+
+  it('renders a quote block as a blockquote', function()
+    local out = render({ '#+BEGIN_QUOTE', 'wise words', '#+END_QUOTE' })
+    assert.is_true(vim.tbl_contains(out, '> wise words'))
+  end)
+
+  it('renders a footnote reference and definition', function()
+    local out = render({ 'note[fn:a]', '[fn:a] the text' })
+    assert.is_true(vim.tbl_contains(out, 'note[^a]'))
+    assert.is_true(vim.tbl_contains(out, '[^a]: the text'))
+  end)
+
+  it('renders a title as an H1 with author/date beneath', function()
+    local out = render({ '#+TITLE: Doc', '#+AUTHOR: Jordan' })
+    assert.are.equal('# Doc', out[1])
+    assert.is_true(vim.tbl_contains(out, '*Jordan*'))
+  end)
+
+  it('includes a table of contents by default', function()
+    local out = render({ '* One' })
+    assert.is_true(vim.tbl_contains(out, '## Table of Contents'))
+  end)
+
+  it('omits the table of contents when toc:nil', function()
+    local out = render({ '#+OPTIONS: toc:nil', '* One' })
+    assert.is_false(vim.tbl_contains(out, '## Table of Contents'))
+  end)
+end)

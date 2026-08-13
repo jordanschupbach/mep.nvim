@@ -1,0 +1,26 @@
+local config = require('mep.config')
+
+describe('mep.config', function()
+  it('setup() with no overrides returns a copy of the defaults', function()
+    local opts = config.setup({})
+    assert.are.same(config.defaults, opts)
+  end)
+
+  it('setup() merges user overrides on top of the defaults', function()
+    local opts = config.setup({ some_new_option = 'value' })
+    assert.are.equal('value', opts.some_new_option)
+    assert.are.equal(opts, config.options)
+  end)
+
+  it('each setup() call starts fresh from defaults rather than merging onto previous options', function()
+    config.setup({ picker = { x = 1 } })
+    local second = config.setup({ picker = { y = 2 } })
+    assert.is_nil(second.picker.x)
+    assert.are.equal(2, second.picker.y)
+  end)
+
+  it('does not mutate the stored defaults table', function()
+    config.setup({ mutated = true })
+    assert.is_nil(config.defaults.mutated)
+  end)
+end)

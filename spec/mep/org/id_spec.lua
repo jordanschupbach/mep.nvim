@@ -1,0 +1,55 @@
+local id_mod = require('mep.org.id')
+
+local function make_buf(lines)
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  return buf
+end
+
+describe('mep.org.id', function()
+  describe('generate', function()
+    it('produces a v4-uuid-shaped string', function()
+      local id = id_mod.generate()
+      assert.is_not_nil(id:match('^%x%x%x%x%x%x%x%x%-%x%x%x%x%-4%x%x%x%-[89ab]%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$'))
+    end)
+
+    it('produces distinct values across calls', function()
+      assert.are_not.equal(id_mod.generate(), id_mod.generate())
+    end)
+  end)
+
+  describe('get_or_create', function()
+    it('creates a fresh ID when the headline has none', function()
+      local buf = make_buf({ '* Task' })
+      local id = id_mod.get_or_create(buf, 1)
+      assert.is_not_nil(id)
+      assert.are.equal(1, id_mod.find(buf, id))
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      assert.are.equal(':PROPERTIES:', lines[2])
+      assert.are.equal(':ID: ' .. id, lines[3])
+    end)
+
+    it('returns the existing ID unchanged', function()
+      local buf = make_buf({ '* Task', ':PROPERTIES:', ':ID: fixed-id', ':END:' })
+      assert.are.equal('fixed-id', id_mod.get_or_create(buf, 1))
+      assert.are.equal('fixed-id', id_mod.get_or_create(buf, 1))
+    end)
+
+    it('returns nil when lnum is not inside a headline', function()
+      local buf = make_buf({ 'no headline' })
+      assert.is_nil(id_mod.get_or_create(buf, 1))
+    end)
+  end)
+
+  describe('find', function()
+    it('finds the headline with a matching ID property', function()
+      local buf = make_buf({ '* A', ':PROPERTIES:', ':ID: aaa', ':END:', '* B', ':PROPERTIES:', ':ID: bbb', ':END:' })
+      assert.are.equal(5, id_mod.find(buf, 'bbb'))
+    end)
+
+    it('returns nil when no headline has that ID', function()
+      local buf = make_buf({ '* A' })
+      assert.is_nil(id_mod.find(buf, 'nope'))
+    end)
+  end)
+end)
