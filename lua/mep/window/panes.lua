@@ -187,7 +187,7 @@ function M.split(direction)
   -- "predictable, nothing-moves-unexpectedly" reason: with it on,
   -- splitting *any* pane re-equalizes *every* window in the tabpage,
   -- not just the one being split — every other pane visibly resizes
-  -- too, undoing whatever sizes `<A-S-h/j/k/l>` set up. Off, a split
+  -- too, undoing whatever sizes `<Mod1-S-h/j/k/l>` set up. Off, a split
   -- only ever divides the pane being split, roughly 50/50, leaving
   -- every other pane's size untouched — confirmed the hard way against
   -- Neovim's own default (on) behavior. 'winwidth'/'winheight' (20/1
@@ -243,7 +243,7 @@ end
 --- buffer itself, just this pane's own reference to it. If tabs remain,
 --- switches to the next one; if that was the pane's last tab (or it
 --- already had none — e.g. a freshly `split()` pane nothing was ever
---- opened in), collapses the pane (`collapse_if_empty`) — `<A-d>`
+--- opened in), collapses the pane (`collapse_if_empty`) — `<Mod1-d>`
 --- always closes the pane it's pressed in, not just ones that happen to
 --- have a tracked tab already.
 function M.remove()
@@ -371,7 +371,7 @@ end
 --- didn't move (there's no normal-window neighbor that way — e.g.
 --- already at the outer edge); from a *floating* window, skip `wincmd`
 --- entirely and go straight to the nearest window — float or normal —
---- in `direction`, so `<A-l>`/`<A-h>` can step further into (or back out
+--- in `direction`, so `<Mod1-l>`/`<Mod1-h>` can step further into (or back out
 --- of) a stack of several floats (`mep.activitybar`'s bar plus an open
 --- panel, say) one at a time, not just bounce straight back to whatever
 --- normal window was current before.
@@ -482,7 +482,7 @@ local saved_winheight = nil
 --- options (all restored by `disable()`) for as long as manual layout
 --- is active, none of which have anything to do with *this* module's
 --- own splitting/focus code — they're Neovim's own automatic resizing
---- behavior, which fights a hand-controlled layout (`<A-S-h/j/k/l>`)
+--- behavior, which fights a hand-controlled layout (`<Mod1-S-h/j/k/l>`)
 --- by design:
 ---   * `'equalalways'` (on by default) — splitting *or closing* any
 ---     pane silently re-equalizes every other pane's size too,

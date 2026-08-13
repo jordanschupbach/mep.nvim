@@ -1,9 +1,12 @@
 --- Per-buffer git gutter: attaches to file-backed buffers inside a git
 --- repo, keeps `mep.git.diff`-computed hunks up to date (debounced, on
 --- text change / save) as sign-column extmarks, and drives hunk
---- navigation (`]c`/`[c`) plus the stage/reset/preview-hunk actions.
---- Diffing itself lives in `mep.git.diff`; this module owns the
---- per-buffer bookkeeping (state, autocmds, signs, keymaps) around it.
+--- navigation (`]c`/`]g` / `[c`/`[g`) plus the stage/reset/preview-hunk
+--- actions. Hunks are computed against `config.options.base` (`'HEAD'`
+--- by default, so staged-but-uncommitted changes still get signs;
+--- `'index'` for unstaged-only). Diffing itself lives in
+--- `mep.git.diff`; this module owns the per-buffer bookkeeping (state,
+--- autocmds, signs, keymaps) around it.
 local core = require('mep.core')
 local config = require('mep.git.config')
 local diff = require('mep.git.diff')
@@ -13,7 +16,7 @@ local M = {}
 local sign_ns = vim.api.nvim_create_namespace('mep_git_gutter')
 local preview_ns = vim.api.nvim_create_namespace('mep_git_gutter_preview')
 
--- bufnr -> { root, relpath, indexed_lines, hunks, debounced, timer, augroup }
+-- bufnr -> { root, relpath, base_lines, hunks, debounced, timer, augroup }
 local state = {}
 local augroup = nil
 local on_change_callbacks = {}
@@ -90,17 +93,17 @@ end
 --- Recompute hunks/signs for `bufnr` right now (the debounced autocmd
 --- handler calls straight into this once its timer fires). A no-op if
 --- `bufnr` was never `attach`ed, or was `detach`ed while the `git show`
---- fetching its indexed content was still in flight.
+--- fetching its diff-base content was still in flight.
 function M.recompute(bufnr)
   local st = state[bufnr]
   if not st or not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
-  diff.get_indexed_content(st.root, st.relpath, function(content)
+  diff.get_base_content(st.root, st.relpath, config.options.base, function(content)
     if not state[bufnr] then
       return
     end
-    st.indexed_lines = diff.split_lines(content)
+    st.base_lines = diff.split_lines(content)
     local hunks = diff.compute_hunks(content, buffer_text(bufnr))
     st.hunks = hunks
     place_signs(bufnr, hunks)
@@ -177,7 +180,7 @@ function M.attach(bufnr)
     root = root,
     relpath = rel,
     hunks = {},
-    indexed_lines = {},
+    base_lines = {},
     debounced = debounced,
     timer = timer,
     augroup = grp,
@@ -294,6 +297,11 @@ end
 --- Stage just `hunk` (the one under the cursor by default) via `git
 --- apply --cached --unidiff-zero` fed a minimal patch built from it
 --- (`mep.git.diff.build_patch`) over stdin. Recomputes on success.
+--- The patch's old side is the diff-base content — with the default
+--- `base = 'HEAD'`, applying it to the index assumes the index still
+--- matches HEAD around the hunk (the common case); when it doesn't
+--- (e.g. the hunk is already partially staged), zero-context apply
+--- fails cleanly and warns rather than mis-staging.
 function M.stage_hunk(bufnr, hunk)
   local st = state[bufnr]
   if not st then
@@ -304,7 +312,7 @@ function M.stage_hunk(bufnr, hunk)
     return
   end
   local buffer_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  local patch = diff.build_patch(st.relpath, st.indexed_lines, buffer_lines, hunk)
+  local patch = diff.build_patch(st.relpath, st.base_lines, buffer_lines, hunk)
   local job = core.job.spawn({
     cmd = { 'git', 'apply', '--cached', '--unidiff-zero', '-' },
     cwd = st.root,
@@ -321,8 +329,8 @@ function M.stage_hunk(bufnr, hunk)
 end
 
 --- Revert `hunk` (the one under the cursor by default) directly in the
---- buffer, restoring its indexed content — no git call needed, this is
---- purely local text.
+--- buffer, restoring its diff-base content — no git call needed, this
+--- is purely local text.
 function M.reset_hunk(bufnr, hunk)
   local st = state[bufnr]
   if not st then
@@ -334,7 +342,7 @@ function M.reset_hunk(bufnr, hunk)
   end
   local restore = {}
   for i = 0, hunk.count_a - 1 do
-    restore[#restore + 1] = st.indexed_lines[hunk.start_a + i] or ''
+    restore[#restore + 1] = st.base_lines[hunk.start_a + i] or ''
   end
   local from, to
   if hunk.count_b > 0 then
@@ -363,7 +371,7 @@ function M.preview_hunk(bufnr, hunk)
   local buffer_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local lines, hls = {}, {}
   for i = 0, hunk.count_a - 1 do
-    lines[#lines + 1] = '-' .. (st.indexed_lines[hunk.start_a + i] or '')
+    lines[#lines + 1] = '-' .. (st.base_lines[hunk.start_a + i] or '')
     hls[#hls + 1] = 'DiffDelete'
   end
   for i = 0, hunk.count_b - 1 do

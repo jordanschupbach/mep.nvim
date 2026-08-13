@@ -3,7 +3,8 @@
 --- "library-specific picker, not a generic `mep.picker.sources.*`
 --- source" reasoning — this one needs its own persisted state, not
 --- just a stateless list of items derived from disk/buffers). `<C-a>`
---- inside the picker adds the current directory to the list; picking
+--- inside the picker adds the current directory to the list, `<C-d>`
+--- deletes the selected project from it (list entry only); picking
 --- one `cd`s into it, opens its README (`config.options.readme_names`,
 --- first one found), and — the one place this library reaches into
 --- another (`mep.filetree`), a deliberate exception to every other
@@ -84,6 +85,24 @@ function M.add(dir)
   end
   table.insert(M.projects, { path = dir })
   M.save()
+end
+
+--- Remove `dir` from the project list, saving to disk — a no-op if it
+--- isn't there. Normalized the same way `M.add` normalizes, so any
+--- spelling of the directory removes the one stored entry. Mutates
+--- `M.projects` in place (never replaces the table) so a picker holding
+--- the same table via `M.list()` sees the removal on its next
+--- `refresh()`.
+function M.remove(dir)
+  dir = vim.fn.fnamemodify(dir, ':p'):gsub('([^/])/$', '%1')
+  ensure_loaded()
+  for i, item in ipairs(M.projects) do
+    if item.path == dir then
+      table.remove(M.projects, i)
+      M.save()
+      return
+    end
+  end
 end
 
 --- The live project list (`{ path = ... }` tables) — loads from disk
@@ -184,8 +203,11 @@ end
 
 --- Open the project picker: fuzzy-find `M.list()`, preview each one's
 --- README (`resolve_readme`), `<C-a>` (`config.options.keymaps.add`)
---- adds the current directory and refreshes the results, Enter `cd`s
---- into the picked one and opens its README (`open_project`).
+--- adds the current directory and refreshes the results, `<C-d>`
+--- (`config.options.keymaps.delete`) deletes the selected project from
+--- the list (just the list entry — nothing on disk) and refreshes,
+--- Enter `cd`s into the picked one and opens its README
+--- (`open_project`).
 function M.picker()
   local preview = require('mep.picker.preview')
   require('mep.picker').start({
@@ -207,6 +229,15 @@ function M.picker()
           M.add()
           picker:refresh()
         end, { buffer = picker.layout.prompt_buf, desc = 'mep.project: add the current directory' })
+      end
+      for _, lhs in ipairs(config.options.keymaps.delete) do
+        vim.keymap.set({ 'i', 'n' }, lhs, function()
+          local item = picker:current_item()
+          if item then
+            M.remove(item.path)
+            picker:refresh()
+          end
+        end, { buffer = picker.layout.prompt_buf, desc = 'mep.project: delete the selected project' })
       end
     end,
   })

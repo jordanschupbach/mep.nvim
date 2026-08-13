@@ -54,14 +54,14 @@ M.defaults = {
   keymaps = {
     next_headline = { '<C-c><C-n>' },
     prev_headline = { '<C-c><C-p>' },
-    promote = { '<M-Left>' },
-    demote = { '<M-Right>' },
-    promote_subtree = { '<M-S-Left>' },
-    demote_subtree = { '<M-S-Right>' },
-    move_subtree_up = { '<M-S-Up>' },
-    move_subtree_down = { '<M-S-Down>' },
-    insert_headline = { '<M-CR>' },
-    insert_todo_headline = { '<M-S-CR>' },
+    promote = { '<Mod1-Left>' },
+    demote = { '<Mod1-Right>' },
+    promote_subtree = { '<Mod1-S-Left>' },
+    demote_subtree = { '<Mod1-S-Right>' },
+    move_subtree_up = { '<Mod1-S-Up>' },
+    move_subtree_down = { '<Mod1-S-Down>' },
+    insert_headline = { '<Mod1-CR>' },
+    insert_todo_headline = { '<Mod1-S-CR>' },
     cycle_todo = { '<C-c><C-t>' },
     cycle_priority = { '<C-c>,' },
     toggle_checkbox = { '<C-c><C-c>' },
@@ -139,10 +139,15 @@ M.defaults = {
   },
 }
 
-M.options = vim.deepcopy(M.defaults)
+local keys = require('mep.core.keys')
+
+-- Expanded through mep.core.keys so `<Mod1-...>` placeholders (in the
+-- defaults and in user-supplied keymaps alike) become the concrete
+-- per-platform modifier — see mep.config.defaults.mods.
+M.options = keys.expand_table(vim.deepcopy(M.defaults))
 
 function M.setup(opts)
-  M.options = vim.tbl_deep_extend('force', vim.deepcopy(M.defaults), opts or {})
+  M.options = keys.expand_table(vim.tbl_deep_extend('force', vim.deepcopy(M.defaults), opts or {}))
   return M.options
 end
 

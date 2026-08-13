@@ -9,7 +9,11 @@ local root = vim.fn.fnamemodify(this_file, ':p:h:h')
 
 vim.opt.runtimepath:prepend(root)
 vim.cmd('runtime! plugin/mep.lua')
-vim.cmd('cd ' .. vim.fn.fnameescape(root))
+
+-- Deliberately no `cd` here: the session should operate on whatever
+-- directory the user launched from. `just try` already runs from the repo
+-- root, and under `nix run` this file lives in the read-only Nix store —
+-- cd-ing to `root` there would strand the session in /nix/store.
 
 vim.o.termguicolors = true
 vim.o.number = true

@@ -7,6 +7,12 @@ M.defaults = {
   -- — `mep.git.gutter.attach(bufnr)` still works called by hand.
   enable = true,
   debounce_ms = 200,
+  -- What the buffer is diffed against for hunks/signs: 'HEAD' (the
+  -- default) marks every uncommitted change, staged or not; 'index'
+  -- diffs against the staged blob instead (`git show :file`), so
+  -- already-staged changes show no signs — gitsigns' own default. Any
+  -- other git revision ('HEAD~1', a sha, a branch) also works.
+  base = 'HEAD',
   -- Sign-column marker + highlight group per `mep.git.diff.sign_rows`
   -- kind. `text` is truncated to `signcolumn`'s own 2-cell width by
   -- Neovim itself if longer.
@@ -19,8 +25,8 @@ M.defaults = {
   },
   keymaps = {
     -- Buffer-local, bound wherever the gutter is attached.
-    next_hunk = { ']c' },
-    prev_hunk = { '[c' },
+    next_hunk = { ']c', ']g' },
+    prev_hunk = { '[c', '[g' },
     stage_hunk = { '<leader>hs' },
     reset_hunk = { '<leader>hr' },
     preview_hunk = { '<leader>hp' },
@@ -55,10 +61,15 @@ M.defaults = {
   },
 }
 
-M.options = vim.deepcopy(M.defaults)
+local keys = require('mep.core.keys')
+
+-- Expanded through mep.core.keys so `<Mod1-...>` placeholders (in the
+-- defaults and in user-supplied keymaps alike) become the concrete
+-- per-platform modifier — see mep.config.defaults.mods.
+M.options = keys.expand_table(vim.deepcopy(M.defaults))
 
 function M.setup(opts)
-  M.options = vim.tbl_deep_extend('force', vim.deepcopy(M.defaults), opts or {})
+  M.options = keys.expand_table(vim.tbl_deep_extend('force', vim.deepcopy(M.defaults), opts or {}))
   return M.options
 end
 

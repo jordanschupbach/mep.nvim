@@ -18,6 +18,7 @@ describe('mep.project.config', function()
     assert.is_true(config.defaults.open_terminal)
     assert.are.equal(0.3, config.defaults.terminal_height_ratio)
     assert.are.same({ '<C-a>' }, config.defaults.keymaps.add)
+    assert.are.same({ '<C-d>' }, config.defaults.keymaps.delete)
   end)
 
   it('setup({}) returns a copy of the defaults', function()

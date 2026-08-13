@@ -78,6 +78,39 @@ describe('mep.project.project', function()
     end)
   end)
 
+  describe('remove', function()
+    it('removes the given directory and persists the removal', function()
+      project.add(tmpdir)
+      project.remove(tmpdir)
+      assert.are.same({}, project.projects)
+
+      project._reset()
+      project.load()
+      assert.are.same({}, project.projects)
+    end)
+
+    it('normalizes the path the same way add does', function()
+      project.add(tmpdir)
+      project.remove(tmpdir .. '/')
+      assert.are.same({}, project.projects)
+    end)
+
+    it('is a no-op for a directory not in the list', function()
+      project.add(tmpdir)
+      assert.has_no.errors(function()
+        project.remove('/tmp/not-in-the-list')
+      end)
+      assert.are.equal(1, #project.projects)
+    end)
+
+    it('mutates the live table list() returned, not a replacement', function()
+      project.add(tmpdir)
+      local items = project.list()
+      project.remove(tmpdir)
+      assert.are.equal(0, #items)
+    end)
+  end)
+
   describe('list', function()
     it('loads from disk on first use', function()
       vim.fn.writefile({ vim.fn.json_encode({ '/tmp/a' }) }, path)
@@ -340,6 +373,59 @@ describe('mep.project.project', function()
 
       assert.are.equal(1, #project.projects)
       assert.is_true(refreshed)
+
+      vim.api.nvim_buf_delete(prompt_buf, { force = true })
+    end)
+
+    it('on_open binds <C-d> to delete the selected project and refresh the picker', function()
+      project.add(tmpdir)
+      local captured = open_and_capture()
+
+      local prompt_buf = vim.api.nvim_create_buf(false, true)
+      local refreshed = false
+      local fake_picker = {
+        layout = { prompt_buf = prompt_buf },
+        refresh = function()
+          refreshed = true
+        end,
+        current_item = function()
+          return project.projects[1]
+        end,
+      }
+      captured.on_open(fake_picker)
+
+      vim.api.nvim_buf_call(prompt_buf, function()
+        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-d>', true, false, true), 'x', false)
+      end)
+
+      assert.are.same({}, project.projects)
+      assert.is_true(refreshed)
+
+      vim.api.nvim_buf_delete(prompt_buf, { force = true })
+    end)
+
+    it('<C-d> with no selected item is a no-op', function()
+      local captured = open_and_capture()
+
+      local prompt_buf = vim.api.nvim_create_buf(false, true)
+      local refreshed = false
+      local fake_picker = {
+        layout = { prompt_buf = prompt_buf },
+        refresh = function()
+          refreshed = true
+        end,
+        current_item = function()
+          return nil
+        end,
+      }
+      captured.on_open(fake_picker)
+
+      assert.has_no.errors(function()
+        vim.api.nvim_buf_call(prompt_buf, function()
+          vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-d>', true, false, true), 'x', false)
+        end)
+      end)
+      assert.is_false(refreshed)
 
       vim.api.nvim_buf_delete(prompt_buf, { force = true })
     end)

@@ -24,13 +24,21 @@ M.defaults = {
     -- Add the current directory to the project list, from inside the
     -- picker prompt.
     add = { '<C-a>' },
+    -- Delete the currently selected project from the list, from inside
+    -- the picker prompt.
+    delete = { '<C-d>' },
   },
 }
 
-M.options = vim.deepcopy(M.defaults)
+local keys = require('mep.core.keys')
+
+-- Expanded through mep.core.keys so `<Mod1-...>` placeholders (in the
+-- defaults and in user-supplied keymaps alike) become the concrete
+-- per-platform modifier — see mep.config.defaults.mods.
+M.options = keys.expand_table(vim.deepcopy(M.defaults))
 
 function M.setup(opts)
-  M.options = vim.tbl_deep_extend('force', vim.deepcopy(M.defaults), opts or {})
+  M.options = keys.expand_table(vim.tbl_deep_extend('force', vim.deepcopy(M.defaults), opts or {}))
   return M.options
 end
 

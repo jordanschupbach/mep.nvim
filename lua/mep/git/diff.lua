@@ -1,23 +1,27 @@
---- Hunk math for `mep.git`: fetching a file's indexed (staged) blob
---- content and diffing it against a buffer's current content. Diffing
---- itself (`compute_hunks`) is pure — built on Neovim's own built-in
---- `vim.diff(a, b, { result_type = 'indices' })`, not a shelled-out
---- `git diff`, so it's fully unit-testable without mocking a
---- subprocess. Only `get_indexed_content` (fetching the blob to diff
---- against) touches git itself, via `mep.core.job`.
+--- Hunk math for `mep.git`: fetching a file's diff-base blob content
+--- (a revision like `HEAD`, or the index) and diffing it against a
+--- buffer's current content. Diffing itself (`compute_hunks`) is pure —
+--- built on Neovim's own built-in `vim.diff(a, b, { result_type =
+--- 'indices' })`, not a shelled-out `git diff`, so it's fully
+--- unit-testable without mocking a subprocess. Only `get_base_content`
+--- (fetching the blob to diff against) touches git itself, via
+--- `mep.core.job`.
 local core = require('mep.core')
 
 local M = {}
 
---- Async: the currently-indexed (staged) content of `relpath` (relative
---- to `root`, the repo root `git show` is run from) — `callback(text)`,
---- or `callback(nil)` for an untracked file / anything `git show`
+--- Async: the content of `relpath` (relative to `root`, the repo root
+--- `git show` is run from) at diff base `base` — `'index'` for the
+--- currently-indexed (staged) blob (`git show :relpath`), any revision
+--- (`'HEAD'`, a sha, ...) for `git show base:relpath`. `callback(text)`,
+--- or `callback(nil)` for an untracked/new file / anything `git show`
 --- can't resolve. `text` has no trailing newline; pass it straight to
 --- `M.split_lines`.
-function M.get_indexed_content(root, relpath, callback)
+function M.get_base_content(root, relpath, base, callback)
+  local spec = (base == nil or base == 'index') and (':' .. relpath) or (base .. ':' .. relpath)
   local out = {}
   core.job.spawn({
-    cmd = { 'git', 'show', ':' .. relpath },
+    cmd = { 'git', 'show', spec },
     cwd = root,
     on_stdout = function(line)
       out[#out + 1] = line
@@ -107,9 +111,9 @@ end
 
 --- A minimal, zero-context unified-diff patch for just `hunk`, suitable
 --- for `git apply --cached --unidiff-zero -` (`mep.git.gutter.
---- stage_hunk`'s own use) — `indexed_lines`/`buffer_lines` are `M.
+--- stage_hunk`'s own use) — `base_lines`/`buffer_lines` are `M.
 --- split_lines` output for the old/new content `hunk` came from.
-function M.build_patch(relpath, indexed_lines, buffer_lines, hunk)
+function M.build_patch(relpath, base_lines, buffer_lines, hunk)
   local lines = {
     'diff --git a/' .. relpath .. ' b/' .. relpath,
     '--- a/' .. relpath,
@@ -117,7 +121,7 @@ function M.build_patch(relpath, indexed_lines, buffer_lines, hunk)
     string.format('@@ -%d,%d +%d,%d @@', hunk.start_a, hunk.count_a, hunk.start_b, hunk.count_b),
   }
   for i = 0, hunk.count_a - 1 do
-    lines[#lines + 1] = '-' .. (indexed_lines[hunk.start_a + i] or '')
+    lines[#lines + 1] = '-' .. (base_lines[hunk.start_a + i] or '')
   end
   for i = 0, hunk.count_b - 1 do
     lines[#lines + 1] = '+' .. (buffer_lines[hunk.start_b + i] or '')

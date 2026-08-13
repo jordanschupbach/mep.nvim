@@ -95,8 +95,9 @@ describe('mep.org.config', function()
     assert.are.equal('data', config.defaults.attach_dir)
   end)
 
-  it('setup({}) returns a copy of the defaults', function()
-    assert.are.same(config.defaults, config.setup({}))
+  it('setup({}) returns a copy of the defaults with <Mod1-...> expanded', function()
+    local keys = require('mep.core.keys')
+    assert.are.same(keys.expand_table(vim.deepcopy(config.defaults)), config.setup({}))
   end)
 
   it('overrides todo_keywords independently of keymaps', function()

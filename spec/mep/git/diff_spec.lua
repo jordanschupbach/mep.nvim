@@ -1,7 +1,7 @@
 local diff = require('mep.git.diff')
 
 describe('mep.git.diff', function()
-  describe('get_indexed_content', function()
+  describe('get_base_content', function()
     local orig_jobstart
     local captured
 
@@ -18,15 +18,25 @@ describe('mep.git.diff', function()
       vim.fn.jobstart = orig_jobstart
     end)
 
-    it('runs `git show :relpath` in root', function()
-      diff.get_indexed_content('/repo', 'lua/foo.lua', function() end)
-      assert.are.same({ 'git', 'show', ':lua/foo.lua' }, captured.cmd)
+    it('runs `git show base:relpath` in root for a revision base', function()
+      diff.get_base_content('/repo', 'lua/foo.lua', 'HEAD', function() end)
+      assert.are.same({ 'git', 'show', 'HEAD:lua/foo.lua' }, captured.cmd)
       assert.are.equal('/repo', captured.opts.cwd)
+    end)
+
+    it("runs `git show :relpath` (the staged blob) for base = 'index'", function()
+      diff.get_base_content('/repo', 'lua/foo.lua', 'index', function() end)
+      assert.are.same({ 'git', 'show', ':lua/foo.lua' }, captured.cmd)
+    end)
+
+    it('treats a nil base as the index', function()
+      diff.get_base_content('/repo', 'lua/foo.lua', nil, function() end)
+      assert.are.same({ 'git', 'show', ':lua/foo.lua' }, captured.cmd)
     end)
 
     it('joins stdout lines and calls back with the content on exit 0', function()
       local result
-      diff.get_indexed_content('/repo', 'foo.lua', function(content)
+      diff.get_base_content('/repo', 'foo.lua', 'HEAD', function(content)
         result = content
       end)
       captured.opts.on_stdout(1, { 'local a = 1', 'local b = 2', '' })
@@ -36,7 +46,7 @@ describe('mep.git.diff', function()
 
     it('calls back with nil on a non-zero exit (e.g. untracked file)', function()
       local result = 'unset'
-      diff.get_indexed_content('/repo', 'foo.lua', function(content)
+      diff.get_base_content('/repo', 'foo.lua', 'HEAD', function(content)
         result = content
       end)
       captured.opts.on_exit(1, 128)

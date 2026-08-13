@@ -11,44 +11,44 @@ M.defaults = {
       -- Split the current pane side by side (`:vsplit`) / stacked
       -- (`:split`), loading the shared "empty pane" scratch buffer into
       -- the new one and selecting it — mep-wm's own `Mod+v`/`Mod+s`.
-      split_vertical = { '<A-v>' },
-      split_horizontal = { '<A-s>' },
+      split_vertical = { '<Mod1-v>' },
+      split_horizontal = { '<Mod1-s>' },
       -- Focus the nearest pane in a direction — Neovim's own built-in
       -- `<C-w>h/j/k/l` under the hood, already "smart" (screen-position
       -- based, not just tree-adjacent) — mep-wm's `Mod+h/j/k/l`.
-      focus_left = { '<A-h>' },
-      focus_down = { '<A-j>' },
-      focus_up = { '<A-k>' },
-      focus_right = { '<A-l>' },
+      focus_left = { '<Mod1-h>' },
+      focus_down = { '<Mod1-j>' },
+      focus_up = { '<Mod1-k>' },
+      focus_right = { '<Mod1-l>' },
       -- Resize the current pane in that direction — `l`/`j` grow it,
       -- `h`/`k` shrink it, except right at the pane's own right/bottom
       -- edge (no room to grow into), where the roles flip so `l`/`j`
       -- and `h`/`k` still do opposite things instead of both growing
       -- or both shrinking (see `mep.window.panes.resize`'s own header
       -- for exactly how) — mep-wm's `Mod+Shift+h/j/k/l`.
-      resize_left = { '<A-S-h>' },
-      resize_down = { '<A-S-j>' },
-      resize_up = { '<A-S-k>' },
-      resize_right = { '<A-S-l>' },
+      resize_left = { '<Mod1-S-h>' },
+      resize_down = { '<Mod1-S-j>' },
+      resize_up = { '<Mod1-S-k>' },
+      resize_right = { '<Mod1-S-l>' },
       -- Move the active tab out of the current pane and into the
       -- neighboring one in that direction (collapsing the current pane
       -- if that was its last tab), focus following it — mep-wm's own
       -- `Mod+Ctrl+h/j/k/l`.
-      move_left = { '<A-C-h>' },
-      move_down = { '<A-C-j>' },
-      move_up = { '<A-C-k>' },
-      move_right = { '<A-C-l>' },
+      move_left = { '<Mod1-C-h>' },
+      move_down = { '<Mod1-C-j>' },
+      move_up = { '<Mod1-C-k>' },
+      move_right = { '<Mod1-C-l>' },
       -- Cycle the active tab within the current pane — mep-wm's own
       -- `Mod+n`/`Mod+p` *and* `Mod+Tab`/`Mod+Shift+Tab`, both bound to
       -- the same two actions there too, not an either/or choice.
-      next_tab = { '<A-n>', '<A-Tab>' },
-      prev_tab = { '<A-p>', '<A-S-Tab>' },
+      next_tab = { '<Mod1-n>', '<Mod1-Tab>' },
+      prev_tab = { '<Mod1-p>', '<Mod1-S-Tab>' },
       -- Remove the active tab from the current pane (never deletes the
       -- buffer itself) — if it was the pane's last tab, close the pane
       -- (or, if it's the tabpage's only remaining window, fall back to
       -- the shared empty-pane buffer instead, since the last window
       -- can't be closed).
-      remove = { '<A-d>' },
+      remove = { '<Mod1-d>' },
     },
   },
   auto = {
@@ -82,10 +82,15 @@ M.defaults = {
   },
 }
 
-M.options = vim.deepcopy(M.defaults)
+local keys = require('mep.core.keys')
+
+-- Expanded through mep.core.keys so `<Mod1-...>` placeholders (in the
+-- defaults and in user-supplied keymaps alike) become the concrete
+-- per-platform modifier — see mep.config.defaults.mods.
+M.options = keys.expand_table(vim.deepcopy(M.defaults))
 
 function M.setup(opts)
-  M.options = vim.tbl_deep_extend('force', vim.deepcopy(M.defaults), opts or {})
+  M.options = keys.expand_table(vim.tbl_deep_extend('force', vim.deepcopy(M.defaults), opts or {}))
   return M.options
 end
 

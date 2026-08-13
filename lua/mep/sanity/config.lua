@@ -15,7 +15,8 @@ M.defaults = {
   -- Tab-management keymaps. `new` is a plain list of lhs strings, all
   -- bound to `:tabnew`. `select` is positional, not a plain list of
   -- equivalent bindings: `select[i]` jumps straight to tab `i` (`:tabnext
-  -- i`) — Alt+1..9 by default, not `<C-Tab>`/`<C-S-Tab>`-style cycling,
+  -- i`) — Mod1+1..9 by default (Alt on Linux/Windows, Option on macOS —
+  -- see mep.config.defaults.mods), not `<C-Tab>`/`<C-S-Tab>`-style cycling,
   -- since terminals vary wildly in whether they even send a distinct
   -- code for Ctrl+Tab/Ctrl+Shift+Tab at all (most don't — confirmed the
   -- hard way, they're indistinguishable from plain Tab/`<C-i>` in a
@@ -26,15 +27,20 @@ M.defaults = {
   tabs = {
     keymaps = {
       new = { '<C-t>' },
-      select = { '<A-1>', '<A-2>', '<A-3>', '<A-4>', '<A-5>', '<A-6>', '<A-7>', '<A-8>', '<A-9>' },
+      select = { '<Mod1-1>', '<Mod1-2>', '<Mod1-3>', '<Mod1-4>', '<Mod1-5>', '<Mod1-6>', '<Mod1-7>', '<Mod1-8>', '<Mod1-9>' },
     },
   },
 }
 
-M.options = vim.deepcopy(M.defaults)
+local keys = require('mep.core.keys')
+
+-- Expanded through mep.core.keys so `<Mod1-...>` placeholders (in the
+-- defaults and in user-supplied keymaps alike) become the concrete
+-- per-platform modifier — see mep.config.defaults.mods.
+M.options = keys.expand_table(vim.deepcopy(M.defaults))
 
 function M.setup(opts)
-  M.options = vim.tbl_deep_extend('force', vim.deepcopy(M.defaults), opts or {})
+  M.options = keys.expand_table(vim.tbl_deep_extend('force', vim.deepcopy(M.defaults), opts or {}))
   return M.options
 end
 

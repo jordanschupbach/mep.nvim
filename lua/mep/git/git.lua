@@ -1,5 +1,6 @@
 --- Aggregator for mep's git library: a gutter (sign-column hunk
---- markers, `]c`/`[c` navigation, stage/reset/preview-hunk actions —
+--- markers, `]c`/`]g` / `[c`/`[g` navigation, stage/reset/preview-hunk
+--- actions —
 --- `mep.git.gutter`, diffing itself in `mep.git.diff`) plus a status
 --- panel (`mep.git.sidebar`, built on `mep.sidebar`) showing changed
 --- files and the current file's hunks, with commit/stage/unstage/

@@ -39,7 +39,9 @@ independently configurable and individually disableable (set its option to
 - **leader** (`mep.sanity.leader`) — sets `mapleader`/`maplocalleader`.
   Default: `' '` (space).
 - **tabs** (`mep.sanity.tabs`) — tab keymaps. Default: `<C-t>` (`:tabnew`),
-  `<A-1>`..`<A-9>` (jump straight to tab 1-9, `:tabnext {n}`) — not
+  `<Mod1-1>`..`<Mod1-9>` (`Mod1` = Alt on Linux/Windows, Option on macOS —
+  see [Global modifier keys](#global-modifier-keys) under Setup; jump
+  straight to tab 1-9, `:tabnext {n}`) — not
   `<C-Tab>`/`<C-S-Tab>`-style cycling, since most terminals don't send a
   distinguishable code for Ctrl+Tab/Ctrl+Shift+Tab at all (Alt+digit is
   much more reliably passed through).
@@ -55,7 +57,7 @@ independently configurable and individually disableable (set its option to
   stays gutter-free either way.
 
 ```lua
-require('mep.sanity').setup({}) -- leader = ' ', tabs.keymaps = { new = { '<C-t>' }, select = { '<A-1>', ..., '<A-9>' } }, number = true, signcolumn = true
+require('mep.sanity').setup({}) -- leader = ' ', tabs.keymaps = { new = { '<C-t>' }, select = { '<Mod1-1>', ..., '<Mod1-9>' } }, number = true, signcolumn = true
 require('mep.sanity').setup({ leader = ',' }) -- leader = ','
 require('mep.sanity').setup({ leader = false }) -- don't touch mapleader at all
 require('mep.sanity').setup({ tabs = { keymaps = { new = { '<leader>tn' } } } }) -- override just one action
@@ -247,6 +249,9 @@ require('mep.project').picker() -- or :MepProjects
 - `<C-a>` (`config.options.keymaps.add`) inside the picker adds the
   current working directory to the list and refreshes the results —
   there's no separate "add project" command, this is the only way in.
+- `<C-d>` (`config.options.keymaps.delete`) inside the picker deletes
+  the currently selected project from the list and refreshes — only the
+  list entry; nothing on disk is touched.
 - Picking one `cd`s into it, then opens its README —
   `config.options.readme_names` (default `{'README.org', 'README.md'}`,
   checked in that order) — if it has one; just the `cd` otherwise. The
@@ -660,15 +665,18 @@ require('mep.org').setup({ agenda_files = { '~/notes/*.org' }, deadline_warning_
 
 #### Keymaps inside org buffers
 
+`Mod1` is Alt on Linux/Windows and Option on macOS — see
+[Global modifier keys](#global-modifier-keys) under Setup.
+
 | Key                    | Mode   | Action                                        |
 |-------------------------|--------|-------------------------------------------------|
 | `<C-c><C-n>`            | normal | Next headline                                    |
 | `<C-c><C-p>`            | normal | Previous headline                                |
-| `<M-Left>` / `<M-Right>`| normal | Promote/demote the current headline only         |
-| `<M-S-Left>`/`<M-S-Right>`| normal | Promote/demote the whole subtree              |
-| `<M-S-Up>`/`<M-S-Down>` | normal | Move the subtree up/down among its siblings      |
-| `<M-CR>`                | normal | Insert a new sibling headline, enter insert mode |
-| `<M-S-CR>`              | normal | Same, pre-filled with the first TODO keyword     |
+| `<Mod1-Left>` / `<Mod1-Right>`| normal | Promote/demote the current headline only         |
+| `<Mod1-S-Left>`/`<Mod1-S-Right>`| normal | Promote/demote the whole subtree              |
+| `<Mod1-S-Up>`/`<Mod1-S-Down>` | normal | Move the subtree up/down among its siblings      |
+| `<Mod1-CR>`                | normal | Insert a new sibling headline, enter insert mode |
+| `<Mod1-S-CR>`              | normal | Same, pre-filled with the first TODO keyword     |
 | `<C-c><C-t>`            | normal | Cycle TODO state (also refreshes ancestor cookies) |
 | `<C-c>,`                | normal | Cycle priority cookie (`[#A]` → `[#B]` → `[#C]` → none) |
 | `<C-c><C-c>`            | normal | Toggle the checkbox under the cursor (also refreshes ancestor cookies) |
@@ -1139,12 +1147,16 @@ A git gutter (`mep.git.gutter`) plus a status panel (`mep.git.sidebar`,
 built on `mep.sidebar`) sharing the same underlying hunk data.
 
 The gutter attaches to any normal, file-backed buffer inside a git repo
-(`BufEnter`/`BufReadPost`), diffing the buffer against its indexed
-(staged) content — via Neovim's own built-in `vim.diff()`, not a
-shelled-out `git diff` — debounced on `TextChanged`/`TextChangedI`/
-`BufWritePost`. Sign-column markers: `+` added, `~` changed, `_`/`‾`
-deleted (all configurable, `mep.git.config.defaults.signs`). Buffer-local
-keymaps: `]c`/`[c` jump to the next/previous hunk (wrapping around);
+(`BufEnter`/`BufReadPost`), diffing the buffer against `config.options.
+base` — `'HEAD'` by default, so every uncommitted change gets a sign
+whether it's staged or not; set it to `'index'` to diff against the
+staged blob instead (only unstaged changes show, gitsigns' own default),
+or any other revision (`'HEAD~1'`, a sha, a branch). Diffing is Neovim's
+own built-in `vim.diff()`, not a shelled-out `git diff` — debounced on
+`TextChanged`/`TextChangedI`/`BufWritePost`. Sign-column markers: `+`
+added, `~` changed, `_`/`‾` deleted (all configurable,
+`mep.git.config.defaults.signs`). Buffer-local keymaps: `]c`/`]g` and
+`[c`/`[g` jump to the next/previous hunk (wrapping around);
 `<leader>hs`/`<leader>hr`/`<leader>hp` stage/reset/preview the hunk under
 the cursor. `reset_hunk` edits the buffer directly (no git call — it's
 just restoring locally-known text); `stage_hunk` builds a minimal,
@@ -1173,7 +1185,7 @@ the file under the cursor, `X` discards its changes after a confirm
 prompt (all configurable, `mep.git.config.defaults.sidebar.keymaps`).
 
 ```lua
-require('mep.git').setup({}) -- enable=true, debounce_ms=200, signs={...}, keymaps={...}, sidebar={...}
+require('mep.git').setup({}) -- enable=true, debounce_ms=200, base='HEAD', signs={...}, keymaps={...}, sidebar={...}
 vim.keymap.set('n', '<leader>gg', function() require('mep.git').sidebar.toggle_split() end)
 vim.keymap.set('n', '<leader>gG', function() require('mep.git').sidebar.toggle_dock() end)
 ```
@@ -1208,15 +1220,17 @@ demand. Both are Lua-native reimplementations of the same ideas in
 `mep-wm` (a separate, real X11/macOS window manager project), adapted to
 what a Neovim split tree can actually represent — not a port of its code.
 
-**Manual layout**: `<A-v>`/`<A-s>` split the current pane side-by-side/
+**Manual layout** (`Mod1` = Alt on Linux/Windows, Option on macOS — see
+[Global modifier keys](#global-modifier-keys) under Setup):
+`<Mod1-v>`/`<Mod1-s>` split the current pane side-by-side/
 stacked, loading a shared "empty pane" placeholder buffer into the new
 one and selecting it (never deletes a buffer — a scratch buffer is used
 purely for "this pane has nothing in it yet"). Opening a real buffer in
 a pane any normal way (`:edit`, a picker, `gf`, LSP goto-definition, ...)
-registers it as that pane's own tab automatically; `<A-n>`/`<A-p>` (also
-`<A-Tab>`/`<A-S-Tab>` — mep-wm binds both to the same two actions too,
-not an either/or choice) cycle a pane's active tab. `<A-h>`/`<A-j>`/
-`<A-k>`/`<A-l>` focus the nearest pane by direction — Neovim's own
+registers it as that pane's own tab automatically; `<Mod1-n>`/`<Mod1-p>` (also
+`<Mod1-Tab>`/`<Mod1-S-Tab>` — mep-wm binds both to the same two actions too,
+not an either/or choice) cycle a pane's active tab. `<Mod1-h>`/`<Mod1-j>`/
+`<Mod1-k>`/`<Mod1-l>` focus the nearest pane by direction — Neovim's own
 built-in `<C-w>h/j/k/l` first (already "smart": nearest by screen
 position, not just tree-adjacent), falling back to the nearest
 focusable *floating* window in that direction (e.g. `mep.activitybar`'s
@@ -1227,12 +1241,12 @@ floating window at all, and isn't even reliably directional *leaving*
 one (it jumps back to some previous normal window regardless of which
 direction was asked for) — so from inside a float, `focus` skips
 `wincmd` entirely and looks for the nearest window (float or normal) in
-that direction instead, letting `<A-l>`/`<A-h>` step through a stack of
+that direction instead, letting `<Mod1-l>`/`<Mod1-h>` step through a stack of
 several floats (a bar plus an open panel, say) one at a time rather than
-bouncing straight back out. `<A-S-h/j/k/l>` resize the current pane that
+bouncing straight back out. `<Mod1-S-h/j/k/l>` resize the current pane that
 way (`h`/`k` shrink, `j`/`l` grow — Neovim's own `:resize`/`:vertical
-resize`); `<A-C-h/j/k/l>` move the pane's active tab into the
-neighboring pane in that direction, focus following. `<A-d>` removes
+resize`); `<Mod1-C-h/j/k/l>` move the pane's active tab into the
+neighboring pane in that direction, focus following. `<Mod1-d>` removes
 the active tab from the current pane (never deletes the buffer) — if
 that was its last tab, the pane closes, unless it's the tabpage's only
 remaining window, which falls back to the empty placeholder instead
@@ -1268,7 +1282,7 @@ require('mep.window').setup({ auto = { keymaps = { square = { '<leader>wq' } } }
 **Scope notes**: the manual layout's tab bar is visible-only, not
 clickable (`mep.git.sidebar`'s widgets are; a `winbar`'s own click
 syntax has enough filename-escaping edge cases that it wasn't worth the
-risk here) — use `<A-n>`/`<A-p>`. Automatic layouts don't nest inside
+risk here) — use `<Mod1-n>`/`<Mod1-p>`. Automatic layouts don't nest inside
 manual panes or vice versa — pick one mode for a given moment, not a
 combination. Applying an automatic layout turns off `'equalalways'`
 globally for the rest of the session (confirmed empirically: Neovim
@@ -1463,6 +1477,36 @@ Equivalent to calling `require('mep.sanity').setup({ leader = ' ' })`,
 `require('mep.icons').setup({ style = 'nerd_font' })`, and so on yourself —
 use whichever fits how you organize your config. Omit a library's key (or
 the whole call) to just get its defaults.
+
+### Global modifier keys
+
+Default keymaps across mep are written with a `<Mod1-...>` placeholder
+instead of hard-coding `<A-...>`: `Mod1` resolves to Alt (`'A'`) on
+Linux/Windows and Option (`'M'`, i.e. Option-as-Meta) on macOS, and every
+library's `setup()` expands the placeholder (via `mep.core.keys`) in both
+its defaults and any keymaps you pass in, so you can use `<Mod1-...>` in
+your own overrides too. Neovim itself treats `<A-...>` and `<M-...>` as
+the same modifier, so the per-platform default is about intent — the part
+that matters is that you can retarget it *once, globally*:
+
+```lua
+require('mep').setup({
+  -- Use Cmd instead of Option for every Mod1 binding (macOS GUIs like
+  -- Neovide; terminals generally can't send Cmd):
+  mods = { mod1 = 'D' },
+  ...
+})
+```
+
+Additional names (`mod2`, `mod3`, ...) have no built-in default but expand
+the same way once configured (e.g. `mods = { mod2 = 'C' }` makes
+`<Mod2-x>` mean `<C-x>`).
+
+Note for macOS terminal users: for Option to reach Neovim as Alt/Meta at
+all, the terminal must be set to send it that way — iTerm2's "Option key:
+Esc+", kitty's `macos_option_as_alt`, Neovide's
+`macos_option_key_is_meta`. That's a terminal setting, not something a
+plugin can do for you.
 
 Suggested keymaps (not set automatically — this plugin doesn't touch your
 keymaps for you):

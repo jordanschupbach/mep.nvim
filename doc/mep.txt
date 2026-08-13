@@ -47,6 +47,16 @@ defaults if it's never called. `opts.<name>` is forwarded to
       picker = { debounce_ms = { dynamic = 150 } },
     })
 <
+Default keymaps across mep are written with a `<Mod1-...>` placeholder,
+expanded by each library's setup(): Alt on Linux/Windows, Option (as
+Meta) on macOS. Retarget it globally via `opts.mods`, e.g. >
+    require('mep').setup({ mods = { mod1 = 'D' } })  -- Cmd, macOS GUIs
+<
+Your own keymap overrides may use `<Mod1-...>` too. Extra names (mod2,
+...) expand only once configured in `mods`. On macOS the terminal must
+send Option as Meta (iTerm2 "Esc+", kitty macos_option_as_alt, Neovide
+macos_option_key_is_meta) for Option-based bindings to arrive at all.
+
 See README.md for the full defaults table of each library.
 
 ==============================================================================
@@ -266,11 +276,11 @@ Keymaps (buffer-local to org filetype buffers), all overridable via
 `setup({ keymaps = {...} })`: >
     <C-c><C-n>          next headline                       (normal)
     <C-c><C-p>          previous headline                    (normal)
-    <M-Left>/<M-Right>  promote/demote current headline       (normal)
-    <M-S-Left>/<M-S-Right>  promote/demote whole subtree       (normal)
-    <M-S-Up>/<M-S-Down> move subtree among siblings           (normal)
-    <M-CR>              insert sibling headline               (normal)
-    <M-S-CR>            insert sibling TODO headline          (normal)
+    <Mod1-Left>/<Mod1-Right>  promote/demote current headline (normal)
+    <Mod1-S-Left>/<Mod1-S-Right>  promote/demote whole subtree  (normal)
+    <Mod1-S-Up>/<Mod1-S-Down>  move subtree among siblings     (normal)
+    <Mod1-CR>           insert sibling headline               (normal)
+    <Mod1-S-CR>         insert sibling TODO headline          (normal)
     <C-c><C-t>          cycle TODO state (refreshes cookies)  (normal)
     <C-c>,              cycle priority cookie                 (normal)
     <C-c><C-c>          toggle checkbox (refreshes cookies)   (normal)
