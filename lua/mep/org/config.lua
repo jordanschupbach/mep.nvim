@@ -51,6 +51,12 @@ M.defaults = {
   -- `:ID:`-derived subdirectory — real org-attach's own default
   -- `org-attach-directory`.
   attach_dir = 'data',
+  -- Give `#+begin_src ... #+end_src` blocks a distinct background (linked
+  -- to `CursorLine` by default — see mep.org.blockhl) so they stand out
+  -- from surrounding prose. Set to false to leave them with no background
+  -- beyond whatever `queries/org/highlights.scm`'s generic block span
+  -- already gives them.
+  src_block_highlight = true,
   keymaps = {
     next_headline = { '<C-c><C-n>' },
     prev_headline = { '<C-c><C-p>' },
@@ -64,7 +70,11 @@ M.defaults = {
     insert_todo_headline = { '<Mod1-S-CR>' },
     cycle_todo = { '<C-c><C-t>' },
     cycle_priority = { '<C-c>,' },
-    toggle_checkbox = { '<C-c><C-c>' },
+    -- Standalone checkbox-toggle binding — unbound by default since real
+    -- org-mode (and this project) puts checkbox toggling on `<C-c><C-c>`
+    -- via ctrl_c_ctrl_c below instead; set this if you want toggling
+    -- reachable on its own key too.
+    toggle_checkbox = {},
     toggle_fold = { '<Tab>' },
     cycle_visibility = { '<S-Tab>' },
     sort = { '<C-c>^' },
@@ -125,6 +135,14 @@ M.defaults = {
     -- buffer.
     babel_execute = { '<C-c>e' },
     babel_tangle = { '<C-c>E' },
+    -- Real org-mode's own `org-ctrl-c-ctrl-c` is heavily overloaded,
+    -- dispatching on whatever's at point; this project's version only
+    -- knows two contexts, checked in that order — see mep.org.org's
+    -- wiring: execute the src block at point (mep.org.babel.execute) if
+    -- the cursor is inside one, else toggle the checkbox at point
+    -- (mep.org.checkbox.toggle) if it's on one. Does nothing in any other
+    -- context, rather than guessing.
+    ctrl_c_ctrl_c = { '<C-c><C-c>' },
     -- Real org-footnote-action's own binding: jumps from a reference to
     -- its definition (or back), or inserts a new footnote when the
     -- cursor is on neither.

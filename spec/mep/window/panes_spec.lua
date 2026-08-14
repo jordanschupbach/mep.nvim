@@ -179,6 +179,40 @@ describe('mep.window.panes', function()
       vim.api.nvim_win_set_buf(win, buf)
       assert.is_nil(panes.get(win))
     end)
+
+    it(
+      'registers a real file opened via :edit (not nvim_win_set_buf) as a new tab, without the '
+        .. 'shared empty buffer getting silently repurposed for it',
+      function()
+        -- Regression: an unnamed, unmodified buffer (the shared empty
+        -- pane placeholder, before it was given a name) is exactly the
+        -- profile Neovim's own `:edit {file}` reuses *in place* — same
+        -- bufnr, renamed to `{file}` — instead of allocating a fresh
+        -- buffer. `sync`'s `buf == ensure_empty_buffer()` identity check
+        -- then wrongly kept treating that now-real buffer as the empty
+        -- placeholder (same bufnr), so it never became a tracked tab —
+        -- silently breaking `move`/`next_tab`/`prev_tab` for any pane
+        -- populated via `:edit` rather than `nvim_win_set_buf` (i.e. the
+        -- normal way a user actually opens a file in a pane).
+        panes.split('v')
+        local win2 = vim.api.nvim_get_current_win()
+        local tmpfile = vim.fn.tempname()
+        vim.cmd('edit ' .. vim.fn.fnameescape(tmpfile))
+        local buf = vim.api.nvim_win_get_buf(win2)
+        created_bufs[#created_bufs + 1] = buf
+        assert.are.same({ tabs = { buf }, active = 1 }, panes.get(win2))
+
+        -- A further split's fresh empty pane must still be a genuine,
+        -- untouched placeholder, not the file just opened above.
+        vim.cmd('wincmd h')
+        panes.split('v')
+        local win3 = vim.api.nvim_get_current_win()
+        assert.are.same({ tabs = {}, active = 0 }, panes.get(win3))
+        assert.are_not.equal(buf, vim.api.nvim_win_get_buf(win3))
+
+        vim.fn.delete(tmpfile)
+      end
+    )
   end)
 
   describe('next_tab / prev_tab', function()
@@ -373,6 +407,38 @@ describe('mep.window.panes', function()
       panes.move('h')
 
       assert.are.same({ tabs = { buf }, active = 1 }, panes.get(win1))
+    end)
+
+    -- End-to-end regression for the real user workflow, through the
+    -- actual default keymaps rather than calling panes.move()/next_tab()
+    -- directly: split a pane, open a real file into it via :edit (as a
+    -- user actually would, not nvim_win_set_buf), merge it into its
+    -- neighbor (mep-wm's own Mod+Ctrl+h/j/k/l), then cycle between the
+    -- two merged tabs (Mod+Tab / Mod+Shift+Tab).
+    it('<Mod1-C-h> merges a pane opened via :edit into its neighbor, and <Mod1-Tab>/<Mod1-S-Tab> cycle the merged tabs', function()
+      local km = config.options.manual.keymaps
+      local win1 = vim.api.nvim_get_current_win()
+      local buf1 = vim.api.nvim_win_get_buf(win1)
+
+      panes.split('v')
+      local tmpfile = vim.fn.tempname()
+      vim.cmd('edit ' .. vim.fn.fnameescape(tmpfile))
+      local win2 = vim.api.nvim_get_current_win()
+      local buf2 = vim.api.nvim_win_get_buf(win2)
+      created_bufs[#created_bufs + 1] = buf2
+
+      local windows_before = #vim.api.nvim_tabpage_list_wins(0)
+      feed(km.move_left[1])
+      assert.are.equal(windows_before - 1, #vim.api.nvim_tabpage_list_wins(0))
+      assert.are.equal(win1, vim.api.nvim_get_current_win())
+      assert.are.same({ tabs = { buf1, buf2 }, active = 2 }, panes.get(win1))
+
+      feed(km.next_tab[2]) -- <Mod1-Tab>
+      assert.are.equal(buf1, vim.api.nvim_win_get_buf(win1))
+      feed(km.prev_tab[2]) -- <Mod1-S-Tab>
+      assert.are.equal(buf2, vim.api.nvim_win_get_buf(win1))
+
+      vim.fn.delete(tmpfile)
     end)
   end)
 

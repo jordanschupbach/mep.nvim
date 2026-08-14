@@ -1,25 +1,36 @@
 --- org-babel: execute `#+begin_src <lang> [header args] ... #+end_src`
---- blocks and tangle their bodies out to real files — bound to
---- `<C-c>e`/`<C-c>E` (execute the block at point / tangle the whole
---- buffer), not real org-babel's own `C-c C-v C-e`/`C-c C-v C-t` (an
---- Emacs `C-c C-v` prefix map convention): confirmed empirically (both
---- via synthetic feedkeys and `nvim_input`) that `<C-v>` can't work as
---- the first key of a Neovim mapping at all — it hard-codes to entering
---- Visual-Block mode before mapping resolution ever sees it. `<C-c><C-c>`
---- was also unavailable, already dedicated to checkbox toggling (see
---- mep.org.tags's `<C-c><C-q>` for the same reasoning applied earlier),
---- so `<C-c>e`/`<C-c>E` instead mirrors this project's own
---- `narrow`/`widen` (`<C-c>n`/`<C-c>N`) convention: lowercase acts on
---- the block at point, uppercase acts on the whole buffer.
+--- blocks and tangle their bodies out to real files. Bound to `<C-c>e`/
+--- `<C-c>E` (execute the block at point / tangle the whole buffer,
+--- mirroring this project's own `narrow`/`widen` `<C-c>n`/`<C-c>N`
+--- convention: lowercase acts on the block at point, uppercase acts on
+--- the whole buffer) and, like real org-mode's heavily-overloaded
+--- `org-ctrl-c-ctrl-c`, also reachable via plain `<C-c><C-c>` — dispatched
+--- contextually in mep.org.org (execute when at a src block, else fall
+--- through to checkbox toggling) rather than bound here directly, since
+--- this module has no notion of checkboxes. Not real org-babel's own
+--- `C-c C-v C-e`/`C-c C-v C-t` (an Emacs `C-c C-v` prefix map convention):
+--- confirmed empirically (both via synthetic feedkeys and `nvim_input`)
+--- that `<C-v>` can't work as the first key of a Neovim mapping at all —
+--- it hard-codes to entering Visual-Block mode before mapping resolution
+--- ever sees it.
 ---
 --- Pure line-pattern parsing, like the rest of mep.org (no tree-sitter
 --- needed; `queries/org/highlights.scm` still treats a whole block as one
---- opaque highlight span since that's a highlighting-only concern).
+--- opaque highlight span since that's a highlighting-only concern;
+--- mep.org.blockhl separately gives a src block a distinct background).
+---
+--- Compiled languages (currently just C/C++) go through an extra compile
+--- step: the block body is wrapped in `int main() { ... }` (with any
+--- `:includes` header-arg tokens prepended as `#include` lines) and
+--- written to a temp source file, compiled to a temp binary, then that
+--- binary is run — two chained `core.job.spawn` calls instead of the one
+--- an interpreted language needs. A failed compile reports the
+--- compiler's stderr the same way a failed run reports the program's.
 ---
 --- Explicitly deferred, likely indefinitely (see ORGMODE_ROADMAP.md):
 --- persistent per-block sessions, and the rest of real org-babel's large
 --- header-argument surface (`:session`, `:noweb`, `:cache`, etc.) beyond
---- `:results` and `:var`.
+--- `:results`, `:var`, and (C/C++ only) `:includes`.
 local core = require('mep.core')
 
 local M = {}
@@ -70,9 +81,43 @@ M.languages = {
       return string.format('console.log(%s);', expr)
     end,
   },
+  cpp = {
+    executable = 'g++',
+    fallback_executable = 'c++',
+    extension = '.cpp',
+    -- Compiled, unlike every other supported language: `execute` compiles
+    -- to a temp binary first, then runs that binary.
+    compiled = true,
+    var_stmt = function(name, literal)
+      return string.format('auto %s = %s;', name, literal)
+    end,
+    print_stmt = function(expr)
+      return string.format('std::cout << (%s) << std::endl;', expr)
+    end,
+    -- The block body is bare statements (see org/test.org), not a full
+    -- translation unit — wrap it in `int main() { ... }`, with each
+    -- whitespace-separated token of the `:includes` header arg (e.g.
+    -- `:includes <iostream>`, real org-babel C++'s own header-arg name)
+    -- prepended as its own `#include` line. No `:includes` at all means
+    -- no `#include`s — same "user's responsibility" contract real
+    -- org-babel uses; a block relying on `:results value`'s implicit
+    -- `std::cout` without including `<iostream>` simply fails to compile.
+    wrap_main = function(includes, body_lines)
+      local lines = {}
+      for _, inc in ipairs(includes) do
+        lines[#lines + 1] = '#include ' .. inc
+      end
+      lines[#lines + 1] = 'int main() {'
+      vim.list_extend(lines, body_lines)
+      lines[#lines + 1] = '  return 0;'
+      lines[#lines + 1] = '}'
+      return lines
+    end,
+  },
 }
 M.languages.bash = M.languages.sh
 M.languages.js = M.languages.javascript
+M.languages['c++'] = M.languages.cpp
 
 --- The executable actually found on PATH for `lang_def` (trying
 --- `fallback_executable` if the primary one isn't there), or nil if
@@ -302,12 +347,67 @@ function M.execute(bufnr, lnum, on_done)
   end
 
   local script_lines = build_script(lang_def, prelude, block.body, results_mode)
-  local path = vim.fn.tempname() .. lang_def.extension
-  vim.fn.writefile(script_lines, path)
+  if lang_def.wrap_main then
+    local includes = {}
+    if args.includes then
+      for inc in args.includes:gmatch('%S+') do
+        includes[#includes + 1] = inc
+      end
+    end
+    script_lines = lang_def.wrap_main(includes, script_lines)
+  end
+  local source_path = vim.fn.tempname() .. lang_def.extension
+  vim.fn.writefile(script_lines, source_path)
+
+  local function finish(code, stdout, stderr, failure_verb)
+    if code ~= 0 then
+      vim.notify(
+        'mep.org: babel ' .. failure_verb .. ' failed (' .. block.lang .. '): ' .. (stderr[1] or ('exit code ' .. code)),
+        vim.log.levels.WARN
+      )
+    end
+    M.insert_or_update_results(bufnr, block.end_lnum, stdout)
+    if on_done then
+      on_done(code, stdout, stderr)
+    end
+  end
+
+  if lang_def.compiled then
+    local binary_path = vim.fn.tempname()
+    local compile_stderr = {}
+    core.job.spawn({
+      cmd = { exe, source_path, '-o', binary_path },
+      on_stderr = function(line)
+        compile_stderr[#compile_stderr + 1] = line
+      end,
+      on_exit = function(compile_code)
+        pcall(vim.fn.delete, source_path)
+        if compile_code ~= 0 then
+          finish(compile_code, {}, compile_stderr, 'compilation')
+          return
+        end
+        local stdout, stderr = {}, {}
+        core.job.spawn({
+          cmd = { binary_path },
+          on_stdout = function(line)
+            stdout[#stdout + 1] = line
+          end,
+          on_stderr = function(line)
+            stderr[#stderr + 1] = line
+          end,
+          on_exit = function(run_code)
+            pcall(vim.fn.delete, binary_path)
+            finish(run_code, stdout, stderr, 'execution')
+          end,
+        })
+      end,
+    })
+    return
+  end
 
   local stdout, stderr = {}, {}
   core.job.spawn({
-    cmd = { exe, path },
+    cmd = { exe, source_path },
     on_stdout = function(line)
       stdout[#stdout + 1] = line
     end,
@@ -315,17 +415,8 @@ function M.execute(bufnr, lnum, on_done)
       stderr[#stderr + 1] = line
     end,
     on_exit = function(code)
-      pcall(vim.fn.delete, path)
-      if code ~= 0 then
-        vim.notify(
-          'mep.org: babel execution failed (' .. block.lang .. '): ' .. (stderr[1] or ('exit code ' .. code)),
-          vim.log.levels.WARN
-        )
-      end
-      M.insert_or_update_results(bufnr, block.end_lnum, stdout)
-      if on_done then
-        on_done(code, stdout, stderr)
-      end
+      pcall(vim.fn.delete, source_path)
+      finish(code, stdout, stderr, 'execution')
     end,
   })
 end

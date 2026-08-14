@@ -42,6 +42,12 @@ describe('mep.org.config', function()
     assert.are.same({ '<C-c>a' }, config.defaults.keymaps.agenda)
     assert.are.same({ '<C-c>e' }, config.defaults.keymaps.babel_execute)
     assert.are.same({ '<C-c>E' }, config.defaults.keymaps.babel_tangle)
+    assert.are.same({ '<C-c><C-c>' }, config.defaults.keymaps.ctrl_c_ctrl_c)
+    -- toggle_checkbox is intentionally unbound by default now — checkbox
+    -- toggling is reached through ctrl_c_ctrl_c's context-sensitive
+    -- dispatch instead (see mep.org.org's bind_keymaps).
+    assert.are.same({}, config.defaults.keymaps.toggle_checkbox)
+    assert.is_true(config.defaults.src_block_highlight)
   end)
 
   it('has defaults for every Phase 1 keymap', function()

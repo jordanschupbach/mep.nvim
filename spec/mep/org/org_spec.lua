@@ -1014,6 +1014,85 @@ describe('mep.org.org', function()
       assert.are.same({ 'print("tangled")' }, vim.fn.readfile(target))
       vim.fn.delete(tmpdir, 'rf')
     end)
+
+    it('<C-c><C-c> executes the src block at the cursor, like <C-c>e', function()
+      stub_install()
+      org.setup({ fold = false })
+
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_set_current_buf(buf)
+      vim.bo[buf].filetype = 'org'
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '#+begin_src lua', 'print(1 + 1)', '#+end_src' })
+      vim.api.nvim_win_set_cursor(0, { 2, 0 })
+
+      vim.cmd('normal \3\3') -- <C-c><C-c>
+
+      assert.are.equal('lua', captured_cmd[1])
+      captured_opts.on_stdout(42, { '2', '' })
+      captured_opts.on_exit(42, 0)
+
+      assert.are.same(
+        { '#+begin_src lua', 'print(1 + 1)', '#+end_src', '#+RESULTS:', ': 2' },
+        vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      )
+    end)
+
+    it('<C-c><C-c> still toggles a checkbox when the cursor is outside any src block', function()
+      stub_install()
+      org.setup({ fold = false })
+
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_set_current_buf(buf)
+      vim.bo[buf].filetype = 'org'
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+        '#+begin_src lua', 'print(1)', '#+end_src',
+        '- [ ] item',
+      })
+      vim.api.nvim_win_set_cursor(0, { 4, 2 })
+
+      captured_cmd = nil -- leftover from an earlier test in this describe block
+      vim.cmd('normal \3\3') -- <C-c><C-c>
+
+      assert.is_nil(captured_cmd) -- babel.execute never ran
+      assert.are.equal('- [X] item', vim.api.nvim_buf_get_lines(buf, 3, 4, false)[1])
+    end)
+  end)
+
+  describe('src block background highlight', function()
+    local blockhl = require('mep.org.blockhl')
+
+    it('is applied to src blocks in an activated buffer by default', function()
+      stub_install()
+      org.setup({ fold = false })
+
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_set_current_buf(buf)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '#+begin_src lua', 'print(1)', '#+end_src' })
+      vim.bo[buf].filetype = 'org'
+
+      local ns = vim.api.nvim_create_namespace('mep_org_src_block_bg')
+      local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, {})
+      assert.are.equal(3, #marks)
+    end)
+
+    it('is skipped entirely when src_block_highlight = false', function()
+      stub_install()
+      org.setup({ fold = false, src_block_highlight = false })
+
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_set_current_buf(buf)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '#+begin_src lua', 'print(1)', '#+end_src' })
+      vim.bo[buf].filetype = 'org'
+
+      local ns = vim.api.nvim_create_namespace('mep_org_src_block_bg')
+      assert.are.same({}, vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, {}))
+    end)
+
+    it('MepOrgSrcBlock resolves to a highlight group after setup', function()
+      stub_install()
+      org.setup({ fold = false })
+      assert.is_not_nil(vim.api.nvim_get_hl(0, { name = blockhl.hl_group }))
+    end)
   end)
 
   describe('Phase 11/12 keymaps', function()

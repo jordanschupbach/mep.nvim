@@ -311,6 +311,127 @@ describe('mep.org.babel', function()
     end)
   end)
 
+  describe('compiled languages (cpp)', function()
+    local orig_jobstart, orig_executable, orig_notify
+    local calls, notifications
+
+    before_each(function()
+      orig_jobstart = vim.fn.jobstart
+      orig_executable = vim.fn.executable
+      orig_notify = vim.notify
+      calls = {}
+      notifications = {}
+      vim.notify = function(msg, level)
+        table.insert(notifications, { msg = msg, level = level })
+      end
+      vim.fn.executable = function(name)
+        return name == 'g++' and 1 or 0
+      end
+      vim.fn.jobstart = function(cmd, opts)
+        table.insert(calls, { cmd = cmd, opts = opts })
+        return 100 + #calls
+      end
+    end)
+
+    after_each(function()
+      vim.fn.jobstart = orig_jobstart
+      vim.fn.executable = orig_executable
+      vim.notify = orig_notify
+    end)
+
+    it('c++ and cpp both resolve to the same language definition', function()
+      assert.are.equal(babel.languages.cpp, babel.languages['c++'])
+    end)
+
+    it('wraps the body in main(), prepending :includes tokens as #include lines', function()
+      local buf = make_buf({
+        '#+begin_src c++ :includes <iostream>',
+        'std::cout << "hi" << std::endl;',
+        '#+end_src',
+      })
+      babel.execute(buf, 1)
+      assert.are.equal(1, #calls)
+      local compile_call = calls[1]
+      assert.are.equal('g++', compile_call.cmd[1])
+      assert.are.equal('-o', compile_call.cmd[3])
+      local source_path = compile_call.cmd[2]
+      assert.are.same({
+        '#include <iostream>',
+        'int main() {',
+        'std::cout << "hi" << std::endl;',
+        '  return 0;',
+        '}',
+      }, vim.fn.readfile(source_path))
+      vim.fn.delete(source_path)
+    end)
+
+    it('injects a :var binding as an auto prelude assignment before the body', function()
+      local buf = make_buf({ '#+begin_src c++ :var x=5', 'std::cout << x;', '#+end_src' })
+      babel.execute(buf, 1)
+      local source_path = calls[1].cmd[2]
+      assert.are.same(
+        { 'int main() {', 'auto x = 5;', 'std::cout << x;', '  return 0;', '}' },
+        vim.fn.readfile(source_path)
+      )
+      vim.fn.delete(source_path)
+    end)
+
+    it('on compile success, deletes the source and spawns the binary; on binary exit, writes results', function()
+      local buf = make_buf({
+        '#+begin_src c++ :includes <iostream>',
+        'std::cout << "hi" << std::endl;',
+        '#+end_src',
+        'after',
+      })
+      babel.execute(buf, 1)
+      local source_path, binary_path = calls[1].cmd[2], calls[1].cmd[4]
+
+      calls[1].opts.on_exit(100, 0)
+      assert.are.equal(0, vim.fn.filereadable(source_path))
+      assert.are.equal(2, #calls)
+      assert.are.same({ binary_path }, calls[2].cmd)
+
+      calls[2].opts.on_stdout(101, { 'hi', '' })
+      calls[2].opts.on_exit(101, 0)
+
+      assert.are.same(
+        { '#+begin_src c++ :includes <iostream>', 'std::cout << "hi" << std::endl;', '#+end_src', '#+RESULTS:', ': hi', 'after' },
+        vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      )
+      assert.are.equal(0, #notifications)
+    end)
+
+    it('warns and skips running the binary when compilation fails', function()
+      local buf = make_buf({ '#+begin_src c++', 'not valid c++', '#+end_src' })
+      babel.execute(buf, 1)
+      calls[1].opts.on_stderr(100, { 'error: expected ...', '' })
+      calls[1].opts.on_exit(100, 1)
+
+      assert.are.equal(1, #calls)
+      assert.are.equal(1, #notifications)
+      assert.matches('babel compilation failed', notifications[1].msg)
+      assert.matches('error: expected', notifications[1].msg)
+      assert.are.same(
+        { '#+begin_src c++', 'not valid c++', '#+end_src', '#+RESULTS:' },
+        vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      )
+    end)
+
+    it('warns and still deletes the binary when the compiled program exits nonzero', function()
+      local buf = make_buf({ '#+begin_src c++', 'return 1;', '#+end_src' })
+      babel.execute(buf, 1)
+      local binary_path = calls[1].cmd[4]
+      calls[1].opts.on_exit(100, 0)
+      calls[2].opts.on_stderr(101, { 'boom', '' })
+      calls[2].opts.on_exit(101, 1)
+
+      assert.are.equal(1, #notifications)
+      assert.matches('babel execution failed', notifications[1].msg)
+      assert.matches('boom', notifications[1].msg)
+      assert.are.equal(0, vim.fn.filereadable(binary_path))
+    end)
+  end)
+
   describe('tangle_target', function()
     it('returns nil when there is no :tangle arg', function()
       local block = { args = '' }

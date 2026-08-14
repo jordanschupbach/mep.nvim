@@ -32,6 +32,22 @@ local augroup = nil
 --- (`bufhidden = 'hide'`, not `'wipe'` — several windows can be showing
 --- it simultaneously, and one of them stopping must not delete it out
 --- from under the others).
+---
+--- Given an explicit name specifically so it's never "unnamed" —
+--- confirmed the hard way: an unnamed, unmodified scratch buffer is
+--- exactly the profile Neovim's own `:edit {file}` reuses *in place*
+--- (same bufnr, renamed to `{file}`) rather than allocating a fresh
+--- buffer for, when it's the current buffer being edited into. Since
+--- this buffer is shared, that reuse would silently repoint every
+--- *other* pane still showing it (any other still-empty pane) at
+--- whatever file was just opened, and `sync`'s own `buf ==
+--- ensure_empty_buffer()` identity check would (wrongly) keep treating
+--- the now-real buffer as the empty placeholder, since it's still the
+--- same bufnr, and skip tracking it as a tab at all — the pane opened
+--- the file into would silently never gain a tab for it, breaking
+--- `move`/`next_tab`/`prev_tab` for that pane. A named buffer is never
+--- eligible for that reuse, so `:edit` always allocates a genuinely new
+--- buffer instead, leaving this one alone.
 local function ensure_empty_buffer()
   if empty_buf and vim.api.nvim_buf_is_valid(empty_buf) then
     return empty_buf
@@ -41,6 +57,7 @@ local function ensure_empty_buffer()
   vim.bo[empty_buf].bufhidden = 'hide'
   vim.bo[empty_buf].swapfile = false
   vim.bo[empty_buf].filetype = 'mep-window-empty'
+  pcall(vim.api.nvim_buf_set_name, empty_buf, 'mep://window/empty-pane-' .. empty_buf)
   return empty_buf
 end
 

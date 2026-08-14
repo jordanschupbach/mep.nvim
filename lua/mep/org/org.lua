@@ -45,6 +45,7 @@ local capture = require('mep.org.capture')
 local agenda = require('mep.org.agenda')
 local babel = require('mep.org.babel')
 local block_mod = require('mep.org.block')
+local blockhl = require('mep.org.blockhl')
 local footnote_mod = require('mep.org.footnote')
 local macro_mod = require('mep.org.macro')
 local include_mod = require('mep.org.include')
@@ -81,6 +82,7 @@ M.capture = capture
 M.agenda = agenda
 M.babel = babel
 M.block = block_mod
+M.blockhl = blockhl
 M.footnote = footnote_mod
 M.macro = macro_mod
 M.include = include_mod
@@ -345,6 +347,18 @@ local function bind_keymaps(bufnr, options)
     babel.tangle_buffer(bufnr)
   end, 'Tangle every :tangle-targeted block')
 
+  map_all('n', keymaps.ctrl_c_ctrl_c, function()
+    local lnum = cursor_line()
+    if babel.at_cursor(bufnr, lnum) then
+      babel.execute(bufnr, lnum)
+      return
+    end
+    local line = vim.api.nvim_buf_get_lines(bufnr, lnum - 1, lnum, false)[1]
+    if line and checkbox.is_checkbox(line) and checkbox.toggle(bufnr, lnum) ~= nil then
+      statistics.update_ancestors(bufnr, lnum, options.todo_keywords)
+    end
+  end, 'Execute the src block at point, or toggle the checkbox at point')
+
   map_all('n', keymaps.footnote_action, function()
     local win_ = vim.api.nvim_get_current_win()
     if footnote_mod.at_cursor(bufnr, win_) then
@@ -395,6 +409,21 @@ local function apply_conceal(bufnr, options)
   })
 end
 
+local function apply_block_highlight(bufnr, options)
+  if not options.src_block_highlight then
+    return
+  end
+  blockhl.define_default_hl()
+  blockhl.apply(bufnr)
+  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'InsertLeave' }, {
+    group = augroup,
+    buffer = bufnr,
+    callback = function()
+      blockhl.apply(bufnr)
+    end,
+  })
+end
+
 local function apply_fold(bufnr, options)
   -- Explicitly reset to Vim's own default ('manual') when disabled,
   -- rather than just skipping — 'foldmethod' is window-local, so a
@@ -435,6 +464,7 @@ local function activate_org_buffer(bufnr, options)
   bind_keymaps(bufnr, options)
   apply_tags_align_on_save(bufnr, options)
   apply_conceal(bufnr, options)
+  apply_block_highlight(bufnr, options)
 end
 
 --- Configure mep.org. See mep.org.config.defaults for
