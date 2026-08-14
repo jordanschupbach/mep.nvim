@@ -430,6 +430,101 @@ describe('mep.org.babel', function()
       assert.matches('boom', notifications[1].msg)
       assert.are.equal(0, vim.fn.filereadable(binary_path))
     end)
+
+    it('skips wrapping in main() when the block sets :main no', function()
+      local buf = make_buf({
+        '#+begin_src c++ :main no',
+        '#include <iostream>',
+        'int main() {',
+        '  std::cout << "hi" << std::endl;',
+        '  return 0;',
+        '}',
+        '#+end_src',
+      })
+      babel.execute(buf, 1)
+      local source_path = calls[1].cmd[2]
+      assert.are.same({
+        '#include <iostream>',
+        'int main() {',
+        '  std::cout << "hi" << std::endl;',
+        '  return 0;',
+        '}',
+      }, vim.fn.readfile(source_path))
+      vim.fn.delete(source_path)
+    end)
+  end)
+
+  describe('compiled languages (c)', function()
+    local orig_jobstart, orig_executable, orig_notify
+    local calls, notifications
+
+    before_each(function()
+      orig_jobstart = vim.fn.jobstart
+      orig_executable = vim.fn.executable
+      orig_notify = vim.notify
+      calls = {}
+      notifications = {}
+      vim.notify = function(msg, level)
+        table.insert(notifications, { msg = msg, level = level })
+      end
+      vim.fn.executable = function(name)
+        return name == 'gcc' and 1 or 0
+      end
+      vim.fn.jobstart = function(cmd, opts)
+        table.insert(calls, { cmd = cmd, opts = opts })
+        return 100 + #calls
+      end
+    end)
+
+    after_each(function()
+      vim.fn.jobstart = orig_jobstart
+      vim.fn.executable = orig_executable
+      vim.notify = orig_notify
+    end)
+
+    it('wraps the body in main() by default, using gcc and a .c source file', function()
+      local buf = make_buf({
+        '#+begin_src c :includes <stdio.h>',
+        'printf("hi\\n");',
+        '#+end_src',
+      })
+      babel.execute(buf, 1)
+      assert.are.equal(1, #calls)
+      local compile_call = calls[1]
+      assert.are.equal('gcc', compile_call.cmd[1])
+      local source_path = compile_call.cmd[2]
+      assert.matches('%.c$', source_path)
+      assert.are.same({
+        '#include <stdio.h>',
+        'int main() {',
+        'printf("hi\\n");',
+        '  return 0;',
+        '}',
+      }, vim.fn.readfile(source_path))
+      vim.fn.delete(source_path)
+    end)
+
+    it('skips wrapping in main() when the block sets :main no', function()
+      local buf = make_buf({
+        '#+begin_src c :main no',
+        '#include <stdio.h>',
+        'int main() {',
+        '  printf("hi\\n");',
+        '  return 0;',
+        '}',
+        '#+end_src',
+      })
+      babel.execute(buf, 1)
+      local source_path = calls[1].cmd[2]
+      assert.are.same({
+        '#include <stdio.h>',
+        'int main() {',
+        '  printf("hi\\n");',
+        '  return 0;',
+        '}',
+      }, vim.fn.readfile(source_path))
+      vim.fn.delete(source_path)
+    end)
   end)
 
   describe('tangle_target', function()

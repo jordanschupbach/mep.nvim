@@ -19,13 +19,17 @@
 --- opaque highlight span since that's a highlighting-only concern;
 --- mep.org.blockhl separately gives a src block a distinct background).
 ---
---- Compiled languages (currently just C/C++) go through an extra compile
+--- Compiled languages (currently C and C++) go through an extra compile
 --- step: the block body is wrapped in `int main() { ... }` (with any
 --- `:includes` header-arg tokens prepended as `#include` lines) and
 --- written to a temp source file, compiled to a temp binary, then that
 --- binary is run — two chained `core.job.spawn` calls instead of the one
 --- an interpreted language needs. A failed compile reports the
 --- compiler's stderr the same way a failed run reports the program's.
+--- A block that already writes its own `int main` (real org-babel-C's
+--- own convention, e.g. a self-contained example) opts out of the
+--- auto-wrap with `:main no` (real org-babel's own header-arg name);
+--- any other value, or the arg's absence, wraps as usual.
 ---
 --- Explicitly deferred, likely indefinitely (see ORGMODE_ROADMAP.md):
 --- persistent per-block sessions, and the rest of real org-babel's large
@@ -34,6 +38,21 @@
 local core = require('mep.core')
 
 local M = {}
+
+--- Shared by every compiled language's `wrap_main`: prepend each
+--- `includes` token as its own `#include` line, then wrap `body_lines`
+--- in `int main() { ... }`.
+local function wrap_in_main(includes, body_lines)
+  local lines = {}
+  for _, inc in ipairs(includes) do
+    lines[#lines + 1] = '#include ' .. inc
+  end
+  lines[#lines + 1] = 'int main() {'
+  vim.list_extend(lines, body_lines)
+  lines[#lines + 1] = '  return 0;'
+  lines[#lines + 1] = '}'
+  return lines
+end
 
 --- Supported languages: `executable` (checked via `vim.fn.executable`,
 --- with `fallback_executable` tried second), `extension` (temp script
@@ -95,24 +114,32 @@ M.languages = {
       return string.format('std::cout << (%s) << std::endl;', expr)
     end,
     -- The block body is bare statements (see org/test.org), not a full
-    -- translation unit — wrap it in `int main() { ... }`, with each
-    -- whitespace-separated token of the `:includes` header arg (e.g.
-    -- `:includes <iostream>`, real org-babel C++'s own header-arg name)
-    -- prepended as its own `#include` line. No `:includes` at all means
-    -- no `#include`s — same "user's responsibility" contract real
+    -- translation unit by default — wrap it in `int main() { ... }`,
+    -- with each whitespace-separated token of the `:includes` header arg
+    -- (e.g. `:includes <iostream>`, real org-babel C++'s own header-arg
+    -- name) prepended as its own `#include` line. No `:includes` at all
+    -- means no `#include`s — same "user's responsibility" contract real
     -- org-babel uses; a block relying on `:results value`'s implicit
     -- `std::cout` without including `<iostream>` simply fails to compile.
-    wrap_main = function(includes, body_lines)
-      local lines = {}
-      for _, inc in ipairs(includes) do
-        lines[#lines + 1] = '#include ' .. inc
-      end
-      lines[#lines + 1] = 'int main() {'
-      vim.list_extend(lines, body_lines)
-      lines[#lines + 1] = '  return 0;'
-      lines[#lines + 1] = '}'
-      return lines
+    -- Skipped entirely when the block sets `:main no` (see `execute`) for
+    -- a self-contained program that already defines its own `main`.
+    wrap_main = wrap_in_main,
+  },
+  c = {
+    executable = 'gcc',
+    extension = '.c',
+    compiled = true,
+    -- `__auto_type` (a long-standing GCC/Clang extension, unlike C++'s
+    -- standard `auto`) so a `:var` binding doesn't need real org-babel's
+    -- type-guessing machinery.
+    var_stmt = function(name, literal)
+      return string.format('__auto_type %s = %s;', name, literal)
     end,
+    -- No `print_stmt`: unlike C++'s `std::cout`, C has no single
+    -- universal print expression (`printf` needs a format specifier
+    -- matched to the value's type) — same "no `:results value` support"
+    -- tradeoff `sh` makes, for the same reason.
+    wrap_main = wrap_in_main,
   },
 }
 M.languages.bash = M.languages.sh
@@ -347,7 +374,7 @@ function M.execute(bufnr, lnum, on_done)
   end
 
   local script_lines = build_script(lang_def, prelude, block.body, results_mode)
-  if lang_def.wrap_main then
+  if lang_def.wrap_main and args.main ~= 'no' then
     local includes = {}
     if args.includes then
       for inc in args.includes:gmatch('%S+') do
