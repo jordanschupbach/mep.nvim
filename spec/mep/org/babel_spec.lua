@@ -79,6 +79,12 @@ describe('mep.org.babel', function()
     it('returns an empty var list for nil', function()
       assert.are.same({ var = {} }, babel.parse_header_args(nil))
     end)
+
+    it('keeps colons inside a value intact (e.g. a Rust use-path)', function()
+      local args = babel.parse_header_args(':includes std::collections::HashMap :results output')
+      assert.are.equal('std::collections::HashMap', args.includes)
+      assert.are.equal('output', args.results)
+    end)
   end)
 
   describe('render_results / insert_or_update_results', function()
@@ -523,6 +529,216 @@ describe('mep.org.babel', function()
         '  return 0;',
         '}',
       }, vim.fn.readfile(source_path))
+      vim.fn.delete(source_path)
+    end)
+  end)
+
+  describe('additional interpreted languages (ruby, perl, r, php)', function()
+    local orig_jobstart, orig_executable
+    local captured_cmd
+
+    before_each(function()
+      orig_jobstart = vim.fn.jobstart
+      orig_executable = vim.fn.executable
+      captured_cmd = nil
+      vim.fn.executable = function(name)
+        return (name == 'ruby' or name == 'perl' or name == 'Rscript' or name == 'php') and 1 or 0
+      end
+      vim.fn.jobstart = function(cmd, opts)
+        captured_cmd = cmd
+        return 1
+      end
+    end)
+
+    after_each(function()
+      vim.fn.jobstart = orig_jobstart
+      vim.fn.executable = orig_executable
+    end)
+
+    it('spawns ruby against a written temp script with a :var prelude', function()
+      local buf = make_buf({ '#+begin_src ruby :var x=5', 'puts(x)', '#+end_src' })
+      babel.execute(buf, 1)
+      assert.are.equal('ruby', captured_cmd[1])
+      assert.are.same({ 'x = 5', 'puts(x)' }, vim.fn.readfile(captured_cmd[2]))
+      vim.fn.delete(captured_cmd[2])
+    end)
+
+    it('renders a ruby :results value expression through puts()', function()
+      local buf = make_buf({ '#+begin_src ruby :results value', '1 + 1', '#+end_src' })
+      babel.execute(buf, 1)
+      assert.are.same({ 'puts(1 + 1)' }, vim.fn.readfile(captured_cmd[2]))
+      vim.fn.delete(captured_cmd[2])
+    end)
+
+    it('spawns perl against a written temp script with a :var prelude', function()
+      local buf = make_buf({ '#+begin_src perl :var x=5', 'print($x, "\\n");', '#+end_src' })
+      babel.execute(buf, 1)
+      assert.are.equal('perl', captured_cmd[1])
+      assert.are.same({ 'my $x = 5;', 'print($x, "\\n");' }, vim.fn.readfile(captured_cmd[2]))
+      vim.fn.delete(captured_cmd[2])
+    end)
+
+    it('spawns Rscript for an "r" language block with a :var prelude', function()
+      local buf = make_buf({ '#+begin_src r :var x=5', 'print(x)', '#+end_src' })
+      babel.execute(buf, 1)
+      assert.are.equal('Rscript', captured_cmd[1])
+      assert.are.same({ 'x <- 5', 'print(x)' }, vim.fn.readfile(captured_cmd[2]))
+      vim.fn.delete(captured_cmd[2])
+    end)
+
+    it('is case-insensitive on the "R" language tag', function()
+      local buf = make_buf({ '#+begin_src R', 'print(1)', '#+end_src' })
+      babel.execute(buf, 1)
+      assert.are.equal('Rscript', captured_cmd[1])
+      vim.fn.delete(captured_cmd[2])
+    end)
+
+    it('wraps a php block in a leading <?php tag with a :var prelude', function()
+      local buf = make_buf({ '#+begin_src php :var x=5', 'echo $x;', '#+end_src' })
+      babel.execute(buf, 1)
+      assert.are.equal('php', captured_cmd[1])
+      assert.are.same({ '<?php', '$x = 5;', 'echo $x;' }, vim.fn.readfile(captured_cmd[2]))
+      vim.fn.delete(captured_cmd[2])
+    end)
+
+    it('skips the <?php wrap when the php block sets :main no', function()
+      local buf = make_buf({ '#+begin_src php :main no', '<?php echo "hi";', '#+end_src' })
+      babel.execute(buf, 1)
+      assert.are.same({ '<?php echo "hi";' }, vim.fn.readfile(captured_cmd[2]))
+      vim.fn.delete(captured_cmd[2])
+    end)
+  end)
+
+  describe('compiled languages (rust)', function()
+    local orig_jobstart, orig_executable, orig_notify
+    local calls, notifications
+
+    before_each(function()
+      orig_jobstart = vim.fn.jobstart
+      orig_executable = vim.fn.executable
+      orig_notify = vim.notify
+      calls = {}
+      notifications = {}
+      vim.notify = function(msg, level)
+        table.insert(notifications, { msg = msg, level = level })
+      end
+      vim.fn.executable = function(name)
+        return name == 'rustc' and 1 or 0
+      end
+      vim.fn.jobstart = function(cmd, opts)
+        table.insert(calls, { cmd = cmd, opts = opts })
+        return 100 + #calls
+      end
+    end)
+
+    after_each(function()
+      vim.fn.jobstart = orig_jobstart
+      vim.fn.executable = orig_executable
+      vim.notify = orig_notify
+    end)
+
+    it('wraps the body in fn main(), prepending :includes tokens as use statements', function()
+      local buf = make_buf({
+        '#+begin_src rust :includes std::collections::HashMap',
+        'println!("hi");',
+        '#+end_src',
+      })
+      babel.execute(buf, 1)
+      assert.are.equal(1, #calls)
+      local compile_call = calls[1]
+      assert.are.equal('rustc', compile_call.cmd[1])
+      assert.are.equal('-o', compile_call.cmd[3])
+      local source_path = compile_call.cmd[2]
+      assert.are.same({
+        'use std::collections::HashMap;',
+        'fn main() {',
+        'println!("hi");',
+        '}',
+      }, vim.fn.readfile(source_path))
+      vim.fn.delete(source_path)
+    end)
+
+    it('on compile success, runs the binary and writes its output as results', function()
+      local buf = make_buf({ '#+begin_src rust', 'println!("hi");', '#+end_src', 'after' })
+      babel.execute(buf, 1)
+      local binary_path = calls[1].cmd[4]
+      calls[1].opts.on_exit(100, 0)
+      assert.are.equal(2, #calls)
+      assert.are.same({ binary_path }, calls[2].cmd)
+      calls[2].opts.on_stdout(101, { 'hi', '' })
+      calls[2].opts.on_exit(101, 0)
+      assert.are.same(
+        { '#+begin_src rust', 'println!("hi");', '#+end_src', '#+RESULTS:', ': hi', 'after' },
+        vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      )
+      assert.are.equal(0, #notifications)
+    end)
+  end)
+
+  describe('compiled languages (go)', function()
+    local orig_jobstart, orig_executable, orig_notify
+    local calls, notifications
+
+    before_each(function()
+      orig_jobstart = vim.fn.jobstart
+      orig_executable = vim.fn.executable
+      orig_notify = vim.notify
+      calls = {}
+      notifications = {}
+      vim.notify = function(msg, level)
+        table.insert(notifications, { msg = msg, level = level })
+      end
+      vim.fn.executable = function(name)
+        return name == 'go' and 1 or 0
+      end
+      vim.fn.jobstart = function(cmd, opts)
+        table.insert(calls, { cmd = cmd, opts = opts })
+        return 100 + #calls
+      end
+    end)
+
+    after_each(function()
+      vim.fn.jobstart = orig_jobstart
+      vim.fn.executable = orig_executable
+      vim.notify = orig_notify
+    end)
+
+    it('compiles with "go build -o <bin> <src>", subcommand before flags', function()
+      local buf = make_buf({
+        '#+begin_src go :includes fmt',
+        'fmt.Println("hi")',
+        '#+end_src',
+      })
+      babel.execute(buf, 1)
+      local compile_call = calls[1]
+      assert.are.same({ 'go', 'build', '-o' }, { compile_call.cmd[1], compile_call.cmd[2], compile_call.cmd[3] })
+      local binary_path = compile_call.cmd[4]
+      local source_path = compile_call.cmd[5]
+      assert.are.same({
+        'package main',
+        '',
+        'import (',
+        '\t"fmt"',
+        ')',
+        '',
+        'func main() {',
+        'fmt.Println("hi")',
+        '}',
+      }, vim.fn.readfile(source_path))
+      vim.fn.delete(source_path)
+
+      calls[1].opts.on_exit(100, 0)
+      assert.are.same({ binary_path }, calls[2].cmd)
+    end)
+
+    it('wraps with an empty import block when there are no :includes', function()
+      local buf = make_buf({ '#+begin_src go', 'x := 1', '_ = x', '#+end_src' })
+      babel.execute(buf, 1)
+      local source_path = calls[1].cmd[5]
+      assert.are.same(
+        { 'package main', '', 'import (', ')', '', 'func main() {', 'x := 1', '_ = x', '}' },
+        vim.fn.readfile(source_path)
+      )
       vim.fn.delete(source_path)
     end)
   end)

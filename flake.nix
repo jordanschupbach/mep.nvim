@@ -45,6 +45,22 @@
             pkgs.just
             pkgs.luajitPackages.busted
             pkgs.luajitPackages.nlua
+
+            # Interpreters/compilers for org/test.org's mep.org.babel
+            # examples (see lua/mep/org/babel.lua's `M.languages`) — not
+            # needed by the plugin itself (which stays a zero-runtime-
+            # dependency, editor-only tool per this repo's own
+            # conventions), just for manually trying each babel language
+            # out in a scratch Neovim.
+            pkgs.gcc # C, C++
+            pkgs.python3 # Python
+            pkgs.nodejs # JavaScript
+            pkgs.ruby
+            pkgs.perl
+            pkgs.R
+            pkgs.php
+            pkgs.rustc # Rust
+            pkgs.go
           ];
         };
       }

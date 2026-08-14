@@ -19,17 +19,24 @@
 --- opaque highlight span since that's a highlighting-only concern;
 --- mep.org.blockhl separately gives a src block a distinct background).
 ---
---- Compiled languages (currently C and C++) go through an extra compile
---- step: the block body is wrapped in `int main() { ... }` (with any
---- `:includes` header-arg tokens prepended as `#include` lines) and
+--- Compiled languages (currently C, C++, Rust, and Go) go through an
+--- extra compile step: the block body is wrapped in each language's own
+--- entry-point form (`int main() { ... }` for C/C++, `fn main() { ... }`
+--- for Rust, `func main() { ... }` inside `package main` for Go), with
+--- any `:includes` header-arg tokens prepended as that language's own
+--- import form (`#include ...`, `use ...;`, or a quoted Go import), and
 --- written to a temp source file, compiled to a temp binary, then that
 --- binary is run — two chained `core.job.spawn` calls instead of the one
---- an interpreted language needs. A failed compile reports the
---- compiler's stderr the same way a failed run reports the program's.
---- A block that already writes its own `int main` (real org-babel-C's
---- own convention, e.g. a self-contained example) opts out of the
---- auto-wrap with `:main no` (real org-babel's own header-arg name);
---- any other value, or the arg's absence, wraps as usual.
+--- an interpreted language needs. The actual compile invocation is
+--- `{ exe, source_path, '-o', binary_path }` (matching gcc/g++/rustc's
+--- shared flag shape) unless the language def supplies its own
+--- `compile_cmd(exe, source_path, binary_path)` — Go needs one, since
+--- `go build`'s subcommand comes before its flags. A failed compile
+--- reports the compiler's stderr the same way a failed run reports the
+--- program's. A block that already writes its own entry point (real
+--- org-babel-C's own convention, e.g. a self-contained example) opts out
+--- of the auto-wrap with `:main no` (real org-babel's own header-arg
+--- name); any other value, or the arg's absence, wraps as usual.
 ---
 --- Explicitly deferred, likely indefinitely (see ORGMODE_ROADMAP.md):
 --- persistent per-block sessions, and the rest of real org-babel's large
@@ -51,6 +58,49 @@ local function wrap_in_main(includes, body_lines)
   vim.list_extend(lines, body_lines)
   lines[#lines + 1] = '  return 0;'
   lines[#lines + 1] = '}'
+  return lines
+end
+
+--- `wrap_main` for Rust: like C/C++'s `wrap_in_main`, but Rust's own
+--- import form (`use x;`) and entry point (`fn main() { ... }`, no
+--- `return 0;`).
+local function wrap_rust_main(includes, body_lines)
+  local lines = {}
+  for _, inc in ipairs(includes) do
+    lines[#lines + 1] = 'use ' .. inc .. ';'
+  end
+  lines[#lines + 1] = 'fn main() {'
+  vim.list_extend(lines, body_lines)
+  lines[#lines + 1] = '}'
+  return lines
+end
+
+--- `wrap_main` for Go: `package main`, an `import ( ... )` block (each
+--- `:includes` token quoted on its own line — empty parens if there are
+--- none, which is legal Go), then `func main() { ... }`.
+local function wrap_go_main(includes, body_lines)
+  local lines = { 'package main', '', 'import (' }
+  for _, inc in ipairs(includes) do
+    lines[#lines + 1] = '\t"' .. inc .. '"'
+  end
+  lines[#lines + 1] = ')'
+  lines[#lines + 1] = ''
+  lines[#lines + 1] = 'func main() {'
+  vim.list_extend(lines, body_lines)
+  lines[#lines + 1] = '}'
+  return lines
+end
+
+--- `wrap_main` for PHP: unlike the other `wrap_main`s this isn't an
+--- entry-point function, just the leading `<?php` tag PHP needs to treat
+--- the file as code instead of raw HTML output (no matching `?>` — the
+--- interpreter runs fine without one, and omitting it is idiomatic for a
+--- pure-PHP file). `:includes`/`:main no` still apply the same as any
+--- other `wrap_main` language, even though PHP has no import statement
+--- for `includes` to render.
+local function wrap_php_tags(_, body_lines)
+  local lines = { '<?php' }
+  vim.list_extend(lines, body_lines)
   return lines
 end
 
@@ -141,6 +191,84 @@ M.languages = {
     -- tradeoff `sh` makes, for the same reason.
     wrap_main = wrap_in_main,
   },
+  ruby = {
+    executable = 'ruby',
+    extension = '.rb',
+    var_stmt = function(name, literal)
+      return string.format('%s = %s', name, literal)
+    end,
+    print_stmt = function(expr)
+      return string.format('puts(%s)', expr)
+    end,
+  },
+  perl = {
+    executable = 'perl',
+    extension = '.pl',
+    var_stmt = function(name, literal)
+      return string.format('my $%s = %s;', name, literal)
+    end,
+    print_stmt = function(expr)
+      return string.format('print(%s, "\\n");', expr)
+    end,
+  },
+  -- Real org-babel's own language name is `R`, matched here case-
+  -- insensitively like every other language (see `execute`'s
+  -- `block.lang:lower()` lookup) — `Rscript` (not the interactive `R`
+  -- REPL binary) runs a script file non-interactively.
+  r = {
+    executable = 'Rscript',
+    extension = '.R',
+    var_stmt = function(name, literal)
+      return string.format('%s <- %s', name, literal)
+    end,
+    print_stmt = function(expr)
+      return string.format('print(%s)', expr)
+    end,
+  },
+  php = {
+    executable = 'php',
+    extension = '.php',
+    var_stmt = function(name, literal)
+      return string.format('$%s = %s;', name, literal)
+    end,
+    print_stmt = function(expr)
+      return string.format('echo (%s) . PHP_EOL;', expr)
+    end,
+    -- Always applied (subject to the usual `:main no` opt-out) since a
+    -- `.php` file with no `<?php` tag at all is just static HTML output,
+    -- not executed code — see `wrap_php_tags` above.
+    wrap_main = wrap_php_tags,
+  },
+  rust = {
+    executable = 'rustc',
+    extension = '.rs',
+    compiled = true,
+    var_stmt = function(name, literal)
+      return string.format('let %s = %s;', name, literal)
+    end,
+    print_stmt = function(expr)
+      return string.format('println!("{}", %s);', expr)
+    end,
+    wrap_main = wrap_rust_main,
+  },
+  go = {
+    executable = 'go',
+    extension = '.go',
+    compiled = true,
+    -- `go build`'s subcommand has to come before its `-o` flag, unlike
+    -- gcc/g++/rustc's shared `<src> -o <bin>` shape — see `compile_cmd`'s
+    -- default fallback in `execute` below.
+    compile_cmd = function(exe, source_path, binary_path)
+      return { exe, 'build', '-o', binary_path, source_path }
+    end,
+    var_stmt = function(name, literal)
+      return string.format('%s := %s', name, literal)
+    end,
+    print_stmt = function(expr)
+      return string.format('fmt.Println(%s)', expr)
+    end,
+    wrap_main = wrap_go_main,
+  },
 }
 M.languages.bash = M.languages.sh
 M.languages.js = M.languages.javascript
@@ -218,17 +346,31 @@ end
 --- scope-narrowing (this covers the common case; multi-line header args
 --- are real org-mode's escape hatch for long argument lists, not
 --- something this project needs to match).
+---
+--- A new key only starts at a colon preceded by whitespace (or the very
+--- start of the string) — not at *every* colon — so a value can itself
+--- contain colons, e.g. a Rust `:includes std::collections::HashMap`
+--- `use`-path.
 function M.parse_header_args(args_str)
   local result = { var = {} }
   if not args_str or args_str == '' then
     return result
   end
-  for key, raw_value in args_str:gmatch(':(%S+)%s*([^:]*)') do
-    local value = raw_value:match('^%s*(.-)%s*$')
-    if key == 'var' then
-      table.insert(result.var, value)
-    else
-      result[key] = value
+  local padded = ' ' .. args_str
+  local starts = {}
+  for pos in padded:gmatch('()%s:%S') do
+    starts[#starts + 1] = pos
+  end
+  for idx, start in ipairs(starts) do
+    local stop = (starts[idx + 1] or (#padded + 1)) - 1
+    local segment = padded:sub(start, stop):match('^%s*:(.*)$')
+    local key, raw_value = segment:match('^(%S+)%s*(.-)%s*$')
+    if key then
+      if key == 'var' then
+        table.insert(result.var, raw_value)
+      else
+        result[key] = raw_value
+      end
     end
   end
   return result
@@ -402,8 +544,10 @@ function M.execute(bufnr, lnum, on_done)
   if lang_def.compiled then
     local binary_path = vim.fn.tempname()
     local compile_stderr = {}
+    local compile_cmd = lang_def.compile_cmd and lang_def.compile_cmd(exe, source_path, binary_path)
+      or { exe, source_path, '-o', binary_path }
     core.job.spawn({
-      cmd = { exe, source_path, '-o', binary_path },
+      cmd = compile_cmd,
       on_stderr = function(line)
         compile_stderr[#compile_stderr + 1] = line
       end,
