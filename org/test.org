@@ -43,48 +43,51 @@ printf("Sum from C main: %d\n", x + y);
 
 * Ruby Example
 
-#+BEGIN_SRC ruby :results output :var x=10 :var y=12
+#+BEGIN_SRC ruby :results output :var x=10 :var y=10
 puts("Sum from Ruby: #{x + y}")
 #+END_SRC
 #+RESULTS:
-: Sum from Ruby: 22
+: Sum from Ruby: 20
 
 * Perl Example
 
-#+BEGIN_SRC perl :results output :var x=10 :var y=12
+#+BEGIN_SRC perl :results output :var x=10 :var y=10
 print("Sum from Perl: ", $x + $y, "\n");
 #+END_SRC
 #+RESULTS:
-: Sum from Perl: 22
+: Sum from Perl: 20
 
 * R Example
 
-#+BEGIN_SRC R :results output :var x=10 :var y=12
-cat(sprintf("Sum from R: %d\n", x + y))
+#+BEGIN_SRC R :results output
+x <- 100
+y <- 200
+print(x + y)
+# cat(sprintf("Sum from R: %d\n", x + y))
 #+END_SRC
 #+RESULTS:
-: Sum from R: 22
+: [1] 300
 
 * PHP Example
 
-#+BEGIN_SRC php :results output :var x=10 :var y=12
+#+BEGIN_SRC php :results output :var x=10 :var y=10
 echo "Sum from PHP: " . ($x + $y) . "\n";
 #+END_SRC
 #+RESULTS:
-: Sum from PHP: 22
+: Sum from PHP: 20
 
 * Rust Example
 
-#+BEGIN_SRC rust :results output :var x=10 :var y=12
+#+BEGIN_SRC rust :results output :var x=10 :var y=10
 println!("Sum from Rust: {}", x + y);
 #+END_SRC
 #+RESULTS:
-: Sum from Rust: 22
+: Sum from Rust: 20
 
 * Go Example
 
-#+BEGIN_SRC go :results output :includes fmt :var x=10 :var y=12
+#+BEGIN_SRC go :results output :includes fmt :var x=10 :var y=10
 fmt.Println("Sum from Go:", x + y)
 #+END_SRC
 #+RESULTS:
-: Sum from Go: 22
+: Sum from Go: 20
