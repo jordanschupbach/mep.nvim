@@ -57,6 +57,31 @@ M.defaults = {
   -- beyond whatever `queries/org/highlights.scm`'s generic block span
   -- already gives them.
   src_block_highlight = true,
+  -- "Poly mode": while the cursor is inside a `#+begin_src <lang> ...
+  -- #+end_src` block, real LSP features (hover, definition, references,
+  -- rename, diagnostics, manual completion) come from *that language's*
+  -- own attached server instead of doing nothing — see mep.org.polyglot.
+  -- Set to `false` to disable entirely; a table overrides just
+  -- `keymaps`. Syntax highlighting for each embedded language (also part
+  -- of "poly mode") isn't gated by this option at all — it's tree-sitter
+  -- language injection (queries/org/injections.scm), active automatically
+  -- any time org highlighting itself (`highlight` above) is, as long as
+  -- that language's own parser happens to be installed.
+  polyglot = {
+    keymaps = {
+      goto_definition = { 'gd' },
+      goto_declaration = { 'gD' },
+      references = { 'gr' },
+      implementation = { 'gi' },
+      type_definition = { '<leader>lt' },
+      hover = { 'K' },
+      signature_help = { '<C-k>' },
+      rename = { '<leader>rn' },
+      diagnostic_prev = { '[d' },
+      diagnostic_next = { ']d' },
+      diagnostic_float = { '<leader>le' },
+    },
+  },
   keymaps = {
     next_headline = { '<C-c><C-n>' },
     prev_headline = { '<C-c><C-p>' },

@@ -653,14 +653,62 @@ structure editing below works immediately, even before (or without) the
   proper node on its own planning line, not inline in body text (a
   grammar limitation, not something fixable from this project's query
   file).
+- **Poly mode** (`mep.org.polyglot`) — a single org file mixing any number
+  of `#+begin_src <lang> ... #+end_src` blocks gets real syntax
+  highlighting *and* real LSP features for each one, in its own language,
+  active by default. Two independent mechanisms, both automatic:
+  - **Highlighting** is tree-sitter language injection
+    (`queries/org/injections.scm`): each block's body is parsed and
+    highlighted with *that language's own* installed parser (the same
+    ones `mep.treesitter`'s curated registry already installs), laid
+    directly on top of `org`'s own highlighting the moment it's active —
+    not gated by any `polyglot` option at all, only by `highlight` above
+    and by that language's parser actually being installed (a language
+    with none just doesn't highlight, the same graceful-miss as anywhere
+    else in this project). Uses only built-in query predicates
+    (`#eq?`/`#any-of?`/`#lua-match?`/`#set!`) to normalize a block's
+    language token (`C++`/`cpp`, `sh`/`bash`, a handful of common
+    alternate capitalizations) to its real parser name — deliberately not
+    a custom Lua predicate, since this query file is discovered and run
+    by Neovim's own highlighter as soon as *any* `org` buffer highlights
+    (`mep.treesitter` can trigger that on its own, without
+    `mep.org.setup()` ever running), and an unregistered custom directive
+    is a hard error there, not a graceful no-op.
+  - **LSP** (real hover/definition/references/rename/diagnostics/manual
+    completion, sourced from each language's own server while the cursor
+    is inside its block) works by keeping one hidden real buffer per
+    language (a "shadow buffer", the same trick otter.nvim popularized)
+    in sync with that language's block bodies, laid out at the *same
+    line numbers* as the org buffer so no position translation is ever
+    needed — just URI rewriting on the way back for anything that
+    returns a location. Each shadow buffer's `filetype` is set to the
+    language's own Neovim filetype and nothing else; whatever server(s)
+    `mep.lsp` (or your own LSP config) already registered via `vim.lsp.
+    enable` for that filetype attach on their own, through Neovim's
+    normal `FileType` autostart — this module never launches a server
+    itself. `gd`/`gD`/`gr`/`gi`/`K`/`<C-k>`/`<leader>rn`/`[d`/`]d`/
+    `<leader>le` (mirroring `mep.lsp`'s own keymap vocabulary) work
+    inside a block using that language's client; outside of one, they
+    fall through to whatever's attached to the org buffer itself
+    (ordinarily nothing, since org has no LSP of its own — real org-mode
+    LSPs, if you have one configured, still get a chance there). Manual
+    completion is `<C-x><C-o>` (`'omnifunc'`), not autotrigger-as-you-type
+    — the org buffer itself never has an attached client for `vim.lsp.
+    completion.enable` to hook into, the same tradeoff otter.nvim makes.
+    Diagnostics are mirrored onto the org buffer directly (`vim.
+    diagnostic.set`), so they show inline over the real text and
+    `[d`/`]d`/`<leader>le` need no bridging at all. Set `polyglot = false`
+    to turn this off entirely (highlighting is unaffected); `polyglot = {
+    keymaps = {...} }` to rebind just the keymaps.
 
 ```lua
-require('mep.org').setup({}) -- todo_keywords={'TODO','DONE'}, highlight=true, fold=true, sort_criteria='alpha', priorities={'A','B','C'}, tags={}, tags_column=77, conceal_links=true, capture_templates={}, agenda_files={}, deadline_warning_days=14, attach_dir='data'
+require('mep.org').setup({}) -- todo_keywords={'TODO','DONE'}, highlight=true, fold=true, sort_criteria='alpha', priorities={'A','B','C'}, tags={}, tags_column=77, conceal_links=true, capture_templates={}, agenda_files={}, deadline_warning_days=14, attach_dir='data', polyglot={keymaps={...}}
 require('mep.org').setup({ todo_keywords = { 'TODO', 'DOING', 'DONE' }, tags = { 'work', 'home', 'urgent' } })
 require('mep.org').setup({ capture_templates = {
   { key = 't', description = 'Task', target = { file = '~/todo.org' }, template = '* TODO %? %a' },
 } })
 require('mep.org').setup({ agenda_files = { '~/notes/*.org' }, deadline_warning_days = 7 })
+require('mep.org').setup({ polyglot = false }) -- no per-language LSP bridging; highlighting still works
 ```
 
 #### Keymaps inside org buffers
@@ -708,9 +756,16 @@ require('mep.org').setup({ agenda_files = { '~/notes/*.org' }, deadline_warning_
 | `<C-c><C-e>`            | normal | Export (prompts ascii/markdown/html, writes next to the source file) |
 | `<Tab>`                 | insert | Expand an easy template (`<s`, `<e`, `<q`, `<c`, `<v`, `<C`), else normal Tab |
 | `<CR>`                  | insert | Continue the list item at the cursor, else a plain newline |
+| `gd` / `gD` / `gr` / `gi` / `<leader>lt` | normal | Poly mode: goto definition/declaration/references/implementation/type-definition, sourced from the src block's own language server (`mep.org.polyglot`, `config.polyglot.keymaps`) |
+| `K` / `<C-k>`           | normal (insert for `<C-k>`) | Poly mode: hover / signature help |
+| `<leader>rn`            | normal | Poly mode: rename (prompts a new name) |
+| `[d` / `]d` / `<leader>le` | normal | Poly mode: previous/next diagnostic, show diagnostic float (diagnostics are mirrored onto the org buffer directly) |
 
 All configurable via `require('mep.org').setup({ keymaps = {...} })` —
-see `lua/mep/org/config.lua` for the full defaults. The capture popup
+see `lua/mep/org/config.lua` for the full defaults. `mep.org.polyglot`'s
+own keymaps (the poly-mode row above) are a separate table,
+`config.polyglot.keymaps` — see `require('mep.org').setup({ polyglot = {
+keymaps = {...} } })` above. The capture popup
 itself has two fixed (not configurable) keymaps, matching real
 org-mode's own capture-buffer bindings: `<C-c><C-c>` files the entry and
 closes, `<C-c><C-k>` aborts without filing.

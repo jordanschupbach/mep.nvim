@@ -52,6 +52,7 @@ local include_mod = require('mep.org.include')
 local id_mod = require('mep.org.id')
 local attach_mod = require('mep.org.attach')
 local export_mod = require('mep.org.export')
+local polyglot = require('mep.org.polyglot')
 
 local M = {}
 M.headline = headline
@@ -89,6 +90,7 @@ M.include = include_mod
 M.id = id_mod
 M.attach = attach_mod
 M.export = export_mod
+M.polyglot = polyglot
 
 local augroup = nil
 
@@ -458,6 +460,10 @@ local function apply_highlight(bufnr, options)
   end)
 end
 
+local function apply_polyglot(bufnr, options)
+  polyglot.setup_buffer(bufnr, options.polyglot)
+end
+
 local function activate_org_buffer(bufnr, options)
   apply_highlight(bufnr, options)
   apply_fold(bufnr, options)
@@ -465,6 +471,7 @@ local function activate_org_buffer(bufnr, options)
   apply_tags_align_on_save(bufnr, options)
   apply_conceal(bufnr, options)
   apply_block_highlight(bufnr, options)
+  apply_polyglot(bufnr, options)
 end
 
 --- Configure mep.org. See mep.org.config.defaults for

@@ -1,0 +1,475 @@
+--- "Poly mode" for org buffers: real LSP features (hover, go-to-
+--- definition, references, rename, diagnostics, completion) sourced from
+--- each embedded language's own server while the cursor is inside a
+--- `#+begin_src <lang> ... #+end_src` block — syntax highlighting for the
+--- same blocks is a separate, simpler mechanism (`queries/org/
+--- injections.scm`'s tree-sitter language injection, active automatically
+--- whenever org highlighting itself is, no wiring here).
+---
+--- The trick (the same one otter.nvim popularized, reimplemented here
+--- with zero dependencies): for every language a buffer's src blocks use,
+--- keep one hidden real Neovim buffer (a "shadow buffer") in sync with
+--- that language's block bodies, laid out at *the same line numbers* as
+--- the org buffer — every line outside a block of that language is left
+--- blank. A src block's own body already has no other indentation
+--- convention to preserve, so this keeps every position (line *and*
+--- column) identical between the org buffer and its shadow buffers,
+--- which means bridging a request is just "ask the shadow buffer's own
+--- attached client about the real cursor position" — no coordinate
+--- translation code needed at all, only URI rewriting (shadow buffer's
+--- fake path -> the real org file) on the way back for anything that
+--- returns a location.
+---
+--- The shadow buffer's `filetype` is set to the target language's own
+--- Neovim filetype (mep.org.lang.to_filetype) and nothing else — no
+--- client is ever started directly by this module. Whatever server(s)
+--- mep.lsp (or your own LSP config) already registered via `vim.lsp.
+--- enable` for that filetype attach on their own, through Neovim's normal
+--- `FileType` autostart, the moment the shadow buffer's filetype is set;
+--- Neovim's own buffer-change tracking then keeps that client's view of
+--- the shadow buffer's text current automatically, the same as any real
+--- edited buffer, whenever `sync` rewrites its lines.
+local babel = require('mep.org.babel')
+local lang = require('mep.org.lang')
+
+local M = {}
+
+-- Forward declaration: get_or_create_shadow (below) registers a
+-- diagnostics-mirroring autocmd per shadow buffer, whose callback is this
+-- function, defined further down.
+local refresh_diagnostics
+
+-- bufnr (org buffer) -> { shadow = {[filetype] = shadow_bufnr}, diag_ns }.
+local state = {}
+-- shadow bufnr -> owning org bufnr, module-level (shared across every org
+-- buffer this module manages) so a jump/rename result landing on some
+-- *other* org buffer's shadow doc still resolves correctly.
+local shadow_owner = {}
+
+--- Every language currently in `raw_lang`'s block(s), rebuilt as
+--- `#total_lines` lines: blank except where `bufnr`'s own src blocks in
+--- that language put real body text, at their own original line numbers.
+local function shadow_lines_for(bufnr, target_ft)
+  local total = vim.api.nvim_buf_line_count(bufnr)
+  local lines = {}
+  for i = 1, total do
+    lines[i] = ''
+  end
+  for _, block in ipairs(babel.find_blocks(bufnr)) do
+    if lang.to_filetype(block.lang) == target_ft then
+      for k, body_line in ipairs(block.body) do
+        lines[block.start_lnum + k] = body_line
+      end
+    end
+  end
+  return lines
+end
+
+--- A shadow buffer name inside the org file's own directory (so LSP
+--- `root_markers` like `.git` still resolve the way they would for the
+--- real file) — never actually written to disk (`buftype=nofile`).
+local function shadow_name(org_bufnr, ft, ext)
+  local org_name = vim.api.nvim_buf_get_name(org_bufnr)
+  local dir = org_name ~= '' and vim.fn.fnamemodify(org_name, ':h') or vim.fn.getcwd()
+  local base = org_name ~= '' and vim.fn.fnamemodify(org_name, ':t:r') or ('buffer-' .. org_bufnr)
+  return string.format('%s/.mep-polyglot/%s.%s%s', dir, base, ft, ext)
+end
+
+local function get_or_create_shadow(org_bufnr, raw_lang)
+  local ft = lang.to_filetype(raw_lang)
+  if not ft then
+    return nil
+  end
+  local st = state[org_bufnr]
+  local shadow = st.shadow[ft]
+  if shadow and vim.api.nvim_buf_is_valid(shadow) then
+    return shadow
+  end
+  shadow = vim.api.nvim_create_buf(false, true)
+  vim.bo[shadow].buftype = 'nofile'
+  vim.bo[shadow].bufhidden = 'hide'
+  vim.bo[shadow].swapfile = false
+  vim.bo[shadow].buflisted = false
+  pcall(vim.api.nvim_buf_set_name, shadow, shadow_name(org_bufnr, ft, lang.to_extension(raw_lang)))
+  -- Fires FileType, which is what vim.lsp.enable's own autocmd (set up by
+  -- mep.lsp.setup, or your own LSP config) listens on to auto-attach.
+  vim.bo[shadow].filetype = ft
+  st.shadow[ft] = shadow
+  shadow_owner[shadow] = org_bufnr
+  -- Buffer-scoped to the shadow buffer itself (auto-cleaned up when it's
+  -- deleted, unlike a single global-scope autocmd that would otherwise
+  -- accumulate one dead closure per org buffer for the lifetime of the
+  -- Neovim session).
+  vim.api.nvim_create_autocmd('DiagnosticChanged', {
+    buffer = shadow,
+    callback = function()
+      refresh_diagnostics(org_bufnr)
+    end,
+  })
+  return shadow
+end
+
+--- Recomputes every shadow buffer for `bufnr` from its current src
+--- blocks: creates one for any newly-seen language, and rewrites the
+--- content of every shadow buffer already tracked (including one whose
+--- language no longer appears in the buffer — left all-blank rather than
+--- deleted, so a language removed and then re-added in the same editing
+--- session doesn't repeatedly tear down and reattach a client).
+function M.sync(bufnr)
+  local st = state[bufnr]
+  if not st then
+    return
+  end
+  for _, block in ipairs(babel.find_blocks(bufnr)) do
+    get_or_create_shadow(bufnr, block.lang)
+  end
+  for ft, shadow in pairs(st.shadow) do
+    if vim.api.nvim_buf_is_valid(shadow) then
+      local lines = shadow_lines_for(bufnr, ft)
+      if not vim.deep_equal(vim.api.nvim_buf_get_lines(shadow, 0, -1, false), lines) then
+        vim.api.nvim_buf_set_lines(shadow, 0, -1, false, lines)
+      end
+    end
+  end
+end
+
+--- `{ shadow_bufnr, ft, block }` for the src block containing `lnum` in
+--- `bufnr`, or nil if `lnum` isn't strictly inside one (on the
+--- `#+begin_src`/`#+end_src` delimiter line itself doesn't count — those
+--- lines are blank in every shadow buffer) or that block's language has
+--- no tracked shadow buffer yet.
+function M.context_at_cursor(bufnr, lnum)
+  local block = babel.at_cursor(bufnr, lnum)
+  if not block or lnum <= block.start_lnum or lnum >= block.end_lnum then
+    return nil
+  end
+  local st = state[bufnr]
+  if not st then
+    return nil
+  end
+  local ft = lang.to_filetype(block.lang)
+  local shadow = ft and st.shadow[ft]
+  if not shadow or not vim.api.nvim_buf_is_valid(shadow) then
+    return nil
+  end
+  return { shadow_bufnr = shadow, ft = ft, block = block }
+end
+
+local function clients_for(shadow_bufnr, method)
+  return vim.lsp.get_clients({ bufnr = shadow_bufnr, method = method })
+end
+
+--- `vim.lsp.util.make_position_params`, computed against the real cursor
+--- (so multi-byte columns on this exact line convert correctly) but
+--- pointed at the shadow buffer's URI — safe because a src block's body
+--- line is copied into its shadow buffer completely unmodified, so the
+--- two are byte-for-byte identical at this line.
+local function position_params(shadow_bufnr, client)
+  local win = vim.api.nvim_get_current_win()
+  local params = vim.lsp.util.make_position_params(win, client.offset_encoding)
+  params.textDocument.uri = vim.uri_from_bufnr(shadow_bufnr)
+  return params
+end
+
+--- Rewrites a shadow buffer's URI back to its owning org buffer's — a
+--- jump/reference/rename result landing back inside the same src block
+--- (or another block of the same language, or even a block in a
+--- *different* open org buffer this module also tracks) should land the
+--- user in the real org file they're editing, never in a hidden shadow
+--- buffer.
+local function translate_uri(uri)
+  local ok, buf = pcall(vim.uri_to_bufnr, uri)
+  if not ok then
+    return uri
+  end
+  local owner = shadow_owner[buf]
+  return owner and vim.uri_from_bufnr(owner) or uri
+end
+
+local function translate_locations(result)
+  if result == nil then
+    return result
+  end
+  local is_single = result.uri ~= nil or result.targetUri ~= nil
+  local list = is_single and { result } or result
+  for _, item in ipairs(list) do
+    if item.uri then
+      item.uri = translate_uri(item.uri)
+    end
+    if item.targetUri then
+      item.targetUri = translate_uri(item.targetUri)
+    end
+  end
+  return is_single and list[1] or list
+end
+
+local function translate_workspace_edit(edit)
+  if not edit then
+    return edit
+  end
+  if edit.changes then
+    local translated = {}
+    for uri, edits in pairs(edit.changes) do
+      translated[translate_uri(uri)] = edits
+    end
+    edit.changes = translated
+  end
+  if edit.documentChanges then
+    for _, change in ipairs(edit.documentChanges) do
+      if change.textDocument and change.textDocument.uri then
+        change.textDocument.uri = translate_uri(change.textDocument.uri)
+      end
+    end
+  end
+  return edit
+end
+
+--- Sends `method` to the first client attached to the shadow buffer for
+--- the src block at `bufnr`'s cursor, running its response through
+--- `translate` (if given) before handing it to Neovim's own default
+--- handler for `method` — same display/jump/quickfix behavior a real
+--- attached client would get, just re-targeted at the org buffer. Falls
+--- back to `vim.lsp.buf[fallback_name]` (whatever's attached to the org
+--- buffer itself, ordinarily nothing) when the cursor isn't inside a src
+--- block at all — real org-mode LSPs, if any, still get a chance outside
+--- of code.
+local function bridge(method, fallback_name, translate, extra_params)
+  return function()
+    local bufnr = vim.api.nvim_get_current_buf()
+    local lnum = vim.api.nvim_win_get_cursor(0)[1]
+    local ctx = M.context_at_cursor(bufnr, lnum)
+    if not ctx then
+      return vim.lsp.buf[fallback_name]()
+    end
+    local clients = clients_for(ctx.shadow_bufnr, method)
+    if #clients == 0 then
+      vim.notify(string.format('mep.org.polyglot: no %s language server attached', ctx.ft), vim.log.levels.WARN)
+      return
+    end
+    local client = clients[1]
+    local params = position_params(ctx.shadow_bufnr, client)
+    if extra_params then
+      params = vim.tbl_extend('force', params, extra_params())
+    end
+    client:request(method, params, function(err, result, rctx, rconfig)
+      if translate then
+        result = translate(result)
+      end
+      local handler = vim.lsp.handlers[method]
+      if handler then
+        handler(err, result, vim.tbl_extend('force', rctx, { bufnr = bufnr }), rconfig)
+      end
+    end, ctx.shadow_bufnr)
+  end
+end
+
+--- `omnifunc` (`:help complete-functions`) for an org buffer: manual
+--- (`<C-x><C-o>`) completion sourced from the src block at the cursor's
+--- own shadow buffer, via `vim.fn.complete()` — deliberately not
+--- autotrigger-as-you-type like `mep.lsp`'s own `vim.lsp.completion.
+--- enable` (that API attaches to a *specific* client+bufnr pair, and the
+--- org buffer itself never has one); asking for completion explicitly is
+--- otter.nvim's own tradeoff for the same reason.
+function M.omnifunc(findstart, base)
+  local bufnr = vim.api.nvim_get_current_buf()
+  if findstart == 1 then
+    local line = vim.api.nvim_get_current_line()
+    local col = vim.api.nvim_win_get_cursor(0)[2]
+    local start = col
+    while start > 0 and line:sub(start, start):match('[%w_]') do
+      start = start - 1
+    end
+    M._omni_start = start
+    return start
+  end
+
+  local lnum = vim.api.nvim_win_get_cursor(0)[1]
+  local ctx = M.context_at_cursor(bufnr, lnum)
+  if not ctx then
+    return -3
+  end
+  local clients = clients_for(ctx.shadow_bufnr, 'textDocument/completion')
+  if #clients == 0 then
+    return -3
+  end
+  local client = clients[1]
+  local params = position_params(ctx.shadow_bufnr, client)
+  -- Snapshotted now, not re-read as `M._omni_start` inside the async
+  -- callback below: `omnifunc` is one shared `v:lua` function reused by
+  -- every org buffer, so a second completion started (in this or another
+  -- buffer) before this request's response arrives would otherwise have
+  -- already overwritten it.
+  local start_col = M._omni_start or 0
+  client:request('textDocument/completion', params, function(err, result)
+    local items = (not err and result) and (result.items or result) or {}
+    local words = {}
+    for _, item in ipairs(items) do
+      local doc = item.documentation
+      words[#words + 1] = {
+        word = item.insertText or item.label,
+        abbr = item.label,
+        menu = item.detail or '',
+        info = type(doc) == 'table' and (doc.value or '') or (doc or ''),
+      }
+    end
+    vim.fn.complete(start_col + 1, words)
+  end, ctx.shadow_bufnr)
+  return -2
+end
+
+function refresh_diagnostics(bufnr)
+  local st = state[bufnr]
+  if not st then
+    return
+  end
+  local all = {}
+  for _, shadow in pairs(st.shadow) do
+    if vim.api.nvim_buf_is_valid(shadow) then
+      vim.list_extend(all, vim.diagnostic.get(shadow))
+    end
+  end
+  vim.diagnostic.set(st.diag_ns, bufnr, all)
+end
+
+local function bind_keymaps(bufnr, keymaps)
+  local map_opts = { buffer = bufnr, silent = true, nowait = true }
+  local function map_all(mode, lhs_list, fn, desc)
+    local opts = vim.tbl_extend('force', map_opts, { desc = desc })
+    for _, lhs in ipairs(lhs_list or {}) do
+      vim.keymap.set(mode, lhs, fn, opts)
+    end
+  end
+
+  map_all('n', keymaps.goto_definition, bridge('textDocument/definition', 'definition', translate_locations), 'polyglot: goto definition')
+  map_all('n', keymaps.goto_declaration, bridge('textDocument/declaration', 'declaration', translate_locations), 'polyglot: goto declaration')
+  map_all('n', keymaps.references, bridge('textDocument/references', 'references', translate_locations, function()
+    return { context = { includeDeclaration = true } }
+  end), 'polyglot: references')
+  map_all('n', keymaps.implementation, bridge('textDocument/implementation', 'implementation', translate_locations), 'polyglot: goto implementation')
+  map_all('n', keymaps.type_definition, bridge('textDocument/typeDefinition', 'type_definition', translate_locations), 'polyglot: goto type definition')
+  map_all('n', keymaps.hover, bridge('textDocument/hover', 'hover'), 'polyglot: hover')
+  map_all({ 'n', 'i' }, keymaps.signature_help, bridge('textDocument/signatureHelp', 'signature_help'), 'polyglot: signature help')
+  map_all('n', keymaps.rename, function()
+    local ctx = M.context_at_cursor(bufnr, vim.api.nvim_win_get_cursor(0)[1])
+    if not ctx then
+      return vim.lsp.buf.rename()
+    end
+    vim.ui.input({ prompt = 'New Name: ' }, function(new_name)
+      if not new_name or new_name == '' then
+        return
+      end
+      bridge('textDocument/rename', 'rename', translate_workspace_edit, function()
+        return { newName = new_name }
+      end)()
+    end)
+  end, 'polyglot: rename')
+  map_all('n', keymaps.diagnostic_prev, vim.diagnostic.goto_prev, 'polyglot: previous diagnostic')
+  map_all('n', keymaps.diagnostic_next, vim.diagnostic.goto_next, 'polyglot: next diagnostic')
+  map_all('n', keymaps.diagnostic_float, vim.diagnostic.open_float, 'polyglot: show diagnostic')
+end
+
+--- Tears down everything this module tracks for `bufnr`: deletes its
+--- shadow buffers (which detaches whatever client was attached to them,
+--- and — since each carries its own buffer-scoped DiagnosticChanged
+--- autocmd — that autocmd too) and clears its mirrored diagnostics.
+--- `bufnr`'s own sync/cleanup autocmds are buffer-scoped as well, so they
+--- likewise vanish on their own once `bufnr` itself is wiped; nothing
+--- else here needs explicit autocmd cleanup.
+function M.teardown_buffer(bufnr)
+  local st = state[bufnr]
+  if not st then
+    return
+  end
+  for _, shadow in pairs(st.shadow) do
+    shadow_owner[shadow] = nil
+    if vim.api.nvim_buf_is_valid(shadow) then
+      -- A shadow buffer's own filetype (mep.treesitter's own generic
+      -- FileType activation, if that library is set up, starts real
+      -- highlighting on it same as any other buffer of that filetype) can
+      -- leave a tree-sitter parser/highlighter attached; deleting the
+      -- buffer out from under an active one is unsafe, so stop it first —
+      -- the same defensive ordering mep.org/mep.treesitter's own specs
+      -- already require (see spec/README.md).
+      pcall(vim.treesitter.stop, shadow)
+      pcall(vim.api.nvim_buf_delete, shadow, { force = true })
+    end
+  end
+  pcall(vim.diagnostic.reset, st.diag_ns, bufnr)
+  state[bufnr] = nil
+end
+
+-- Created lazily, once, the first time any buffer is set up — deliberately
+-- *not* mep.org.org's own per-`setup()` `MepOrg` group: that one is
+-- recreated (`clear = true`) on every `mep.org.setup()` call so changed
+-- options take effect, but `mep.org.setup()` also re-activates every
+-- already-loaded org buffer on each call, which would mean re-registering
+-- (and, worse, transiently *dropping*, between the old group's deletion
+-- and the new one's autocmds landing) every open buffer's sync/diagnostic/
+-- cleanup autocmds on every single `setup()` call — real, avoidable cost
+-- with many org buffers open. A stable, buffer-scoped group sidesteps
+-- this: each buffer's own autocmds are registered exactly once (guarded
+-- by `state[bufnr]` below) and never need to move.
+local augroup = nil
+local function ensure_augroup()
+  if not augroup then
+    augroup = vim.api.nvim_create_augroup('MepOrgPolyglot', { clear = true })
+  end
+  return augroup
+end
+
+--- Activates (or tears down, if `opts` is falsy) poly-mode LSP bridging
+--- for org buffer `bufnr`. `opts` is `mep.org.config.defaults.polyglot`'s
+--- own shape: `{ keymaps = {...} }`. Safe to call repeatedly for the same
+--- buffer (`mep.org.setup()` does, once per already-open org buffer, on
+--- every call) — content re-syncs and keymaps/omnifunc re-bind every
+--- time (cheap, idempotent), but this buffer's own sync/diagnostic/
+--- cleanup autocmds are only ever registered on the *first* call.
+function M.setup_buffer(bufnr, opts)
+  if not opts then
+    M.teardown_buffer(bufnr)
+    return
+  end
+  local first_time = state[bufnr] == nil
+  if first_time then
+    state[bufnr] = {
+      shadow = {},
+      diag_ns = vim.api.nvim_create_namespace('mep_org_polyglot_diag_' .. bufnr),
+    }
+  end
+
+  M.sync(bufnr)
+
+  if first_time then
+    local group = ensure_augroup()
+    vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'InsertLeave' }, {
+      group = group,
+      buffer = bufnr,
+      callback = function()
+        M.sync(bufnr)
+      end,
+    })
+    -- Deferred via vim.schedule: deleting *other* buffers (the shadow
+    -- ones) synchronously from inside a BufDelete/BufWipeout handler for
+    -- `bufnr` itself crashes Neovim (confirmed empirically while building
+    -- this) — those events fire mid-teardown of the triggering buffer,
+    -- and `nvim_buf_delete`ing unrelated buffers from within that window
+    -- corrupts state. Scheduling runs the actual cleanup on the next
+    -- event loop tick instead, once `bufnr`'s own deletion has fully
+    -- finished.
+    vim.api.nvim_create_autocmd({ 'BufDelete', 'BufWipeout' }, {
+      group = group,
+      buffer = bufnr,
+      once = true,
+      callback = function()
+        vim.schedule(function()
+          M.teardown_buffer(bufnr)
+        end)
+      end,
+    })
+  end
+
+  vim.bo[bufnr].omnifunc = "v:lua.require'mep.org.polyglot'.omnifunc"
+  bind_keymaps(bufnr, opts.keymaps or {})
+end
+
+return M
