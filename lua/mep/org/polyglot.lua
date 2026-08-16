@@ -549,15 +549,48 @@ function M.omnifunc(findstart, base)
   return -2
 end
 
+--- Whether `diag` (a `vim.diagnostic.get` entry, 0-indexed `lnum`) falls
+--- strictly inside one of `ranges` (1-indexed `{start_lnum, end_lnum}`
+--- delimiter-line pairs, `find_blocks`'s own shape) — i.e. on an actual
+--- body line of that language's block(s), not on one of `shadow_lines_for`'s
+--- blank filler lines. A linter that reasons about the *whole* shadow
+--- "file" (confirmed empirically: R's `languageserver`/lintr flags
+--- "Remove trailing blank lines" against the hundreds of blank filler
+--- lines below a one-line R block) would otherwise land its diagnostic at
+--- that blank line's position — which, once mirrored onto the org buffer,
+--- is wherever some *other* language's block happens to sit at that same
+--- line number, nowhere near the R code it's actually about.
+local function diagnostic_in_ranges(diag, ranges)
+  local lnum = diag.lnum + 1
+  for _, range in ipairs(ranges) do
+    if lnum > range.start_lnum and lnum < range.end_lnum then
+      return true
+    end
+  end
+  return false
+end
+
 function refresh_diagnostics(bufnr)
   local st = state[bufnr]
   if not st then
     return
   end
+  local ranges_by_ft = {}
+  for _, block in ipairs(babel.find_blocks(bufnr)) do
+    local ft = lang.to_filetype(block.lang)
+    if ft and st.shadow[ft] then
+      ranges_by_ft[ft] = ranges_by_ft[ft] or {}
+      table.insert(ranges_by_ft[ft], block)
+    end
+  end
   local all = {}
-  for _, shadow in pairs(st.shadow) do
+  for ft, shadow in pairs(st.shadow) do
     if vim.api.nvim_buf_is_valid(shadow) then
-      vim.list_extend(all, vim.diagnostic.get(shadow))
+      for _, diag in ipairs(vim.diagnostic.get(shadow)) do
+        if diagnostic_in_ranges(diag, ranges_by_ft[ft] or {}) then
+          all[#all + 1] = diag
+        end
+      end
     end
   end
   vim.diagnostic.set(st.diag_ns, bufnr, all)

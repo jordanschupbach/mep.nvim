@@ -1,4 +1,7 @@
 .direnv/
 doc/tags
 .mep-polyglot/
+.clj-kondo/
+.lsp/
+.metals/
 

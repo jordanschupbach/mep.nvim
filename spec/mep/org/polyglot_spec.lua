@@ -375,6 +375,44 @@ describe('mep.org.polyglot', function()
       assert.are.equal(2, diags[1].lnum)
       assert.are.equal('unused variable', diags[1].message)
     end)
+
+    it('drops a shadow diagnostic that falls outside that language own block(s) (blank filler lines)', function()
+      -- Two languages sharing one org buffer: the lua block is only 1
+      -- line long, so its shadow buffer is blank everywhere except line
+      -- 3 (the python block's own line 7 included). A whole-file linter
+      -- reporting against one of those blank filler lines (e.g. R's
+      -- lintr flagging "Remove trailing blank lines") must not surface on
+      -- the org buffer at all, and must never land on the *other*
+      -- language's real content that happens to share that line number.
+      local bufnr = buf({
+        '* Task',
+        '#+begin_src lua',
+        'local x = 1',
+        '#+end_src',
+        '',
+        '#+begin_src python',
+        'y = 2',
+        '#+end_src',
+      })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local lua_shadow = polyglot.context_at_cursor(bufnr, 3).shadow_bufnr
+
+      local ns = vim.api.nvim_create_namespace('test_mep_polyglot_diag_outside')
+      vim.diagnostic.set(ns, lua_shadow, {
+        -- Line 7 (0-indexed 6) is blank in the lua shadow buffer (it's
+        -- the python block's own body line) but should still be dropped
+        -- even though it coincides with real content in *another*
+        -- shadow buffer.
+        { lnum = 6, col = 0, message = 'Remove trailing blank lines', severity = vim.diagnostic.severity.WARN },
+      })
+
+      -- No diagnostic-count change is itself the assertion here, so
+      -- there's no event to vim.wait on; DiagnosticChanged for the lua
+      -- shadow buffer has already fired synchronously by the time
+      -- vim.diagnostic.set above returns.
+      local diags = vim.diagnostic.get(bufnr)
+      assert.are.equal(0, #diags)
+    end)
   end)
 
   -- Opens `bufnr` in its own scoped floating window (entered, so
