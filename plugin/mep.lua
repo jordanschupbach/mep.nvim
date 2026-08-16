@@ -23,6 +23,7 @@ local function set_highlights()
   vim.api.nvim_set_hl(0, 'MepIconFile', { link = 'Normal', default = true })
   vim.api.nvim_set_hl(0, 'MepIconDirectory', { link = 'Directory', default = true })
   vim.api.nvim_set_hl(0, 'MepFiletreeDirectory', { link = 'Directory', default = true })
+  vim.api.nvim_set_hl(0, 'MepFiletreeHint', { link = 'Comment', default = true })
   vim.api.nvim_set_hl(0, 'MepDashboardLogo', { link = 'Title', default = true })
   vim.api.nvim_set_hl(0, 'MepDashboardVersion', { link = 'Title', default = true })
   vim.api.nvim_set_hl(0, 'MepDashboardCommand', { link = 'Special', default = true })
@@ -77,6 +78,15 @@ local function set_highlights()
   vim.api.nvim_set_hl(0, 'MepOrgHeadline4', { link = 'DiagnosticHint', default = true })
   vim.api.nvim_set_hl(0, 'MepOrgHeadline5', { link = 'Keyword', default = true })
   vim.api.nvim_set_hl(0, 'MepOrgHeadline6', { link = 'Type', default = true })
+  -- mep.org.todohl's own `M.LINKS`, repeated here for the same
+  -- ColorScheme-survival reason as the MepOrgHeadlineN groups above —
+  -- keep in sync with that table by hand if it ever changes.
+  vim.api.nvim_set_hl(0, 'MepOrgTodoKeyword1', { link = 'DiagnosticError', default = true })
+  vim.api.nvim_set_hl(0, 'MepOrgTodoKeyword2', { link = 'DiagnosticOk', default = true })
+  vim.api.nvim_set_hl(0, 'MepOrgTodoKeyword3', { link = 'DiagnosticWarn', default = true })
+  vim.api.nvim_set_hl(0, 'MepOrgTodoKeyword4', { link = 'DiagnosticInfo', default = true })
+  vim.api.nvim_set_hl(0, 'MepOrgTodoKeyword5', { link = 'DiagnosticHint', default = true })
+  vim.api.nvim_set_hl(0, 'MepOrgTodoKeyword6', { link = 'Type', default = true })
 end
 set_highlights()
 vim.api.nvim_create_autocmd('ColorScheme', {
@@ -99,6 +109,10 @@ end, { desc = 'mep.nvim: fuzzy-find lines in the current buffer' })
 vim.api.nvim_create_user_command('MepBuffers', function()
   require('mep.picker').buffers()
 end, { desc = 'mep.nvim: fuzzy-find among open buffers' })
+
+vim.api.nvim_create_user_command('MepScratch', function()
+  require('mep.scratch').open()
+end, { desc = 'mep.nvim: open the (single, persistent) scratch buffer in the current window' })
 
 vim.api.nvim_create_user_command('MepProjects', function()
   require('mep.project').picker()

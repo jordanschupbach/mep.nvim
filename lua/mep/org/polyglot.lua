@@ -630,6 +630,12 @@ local function bind_keymaps(bufnr, keymaps)
   end, 'polyglot: rename')
   map_all('n', keymaps.diagnostic_prev, vim.diagnostic.goto_prev, 'polyglot: previous diagnostic')
   map_all('n', keymaps.diagnostic_next, vim.diagnostic.goto_next, 'polyglot: next diagnostic')
+  map_all('n', keymaps.diagnostic_prev_error, function()
+    vim.diagnostic.goto_prev({ severity = vim.diagnostic.severity.ERROR })
+  end, 'polyglot: previous error')
+  map_all('n', keymaps.diagnostic_next_error, function()
+    vim.diagnostic.goto_next({ severity = vim.diagnostic.severity.ERROR })
+  end, 'polyglot: next error')
   map_all('n', keymaps.diagnostic_float, vim.diagnostic.open_float, 'polyglot: show diagnostic')
 end
 

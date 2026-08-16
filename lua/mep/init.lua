@@ -4,7 +4,7 @@
 --- `mep.filetree`, `mep.treesitter`, `mep.org`, `mep.markdown`, `mep.picker`,
 --- `mep.whichkey`, `mep.sidebar`, `mep.notify`, `mep.activitybar`,
 --- `mep.lsp`, `mep.completion`, `mep.url`, `mep.git`, `mep.window`,
---- `mep.theme`, `mep.chrome`, `mep.project`, `mep.ai`);
+--- `mep.theme`, `mep.chrome`, `mep.project`, `mep.ai`, `mep.scratch`);
 --- libraries can equally be required and configured directly, e.g.
 --- `require('mep.picker').setup({ ... })`.
 local M = {}
@@ -49,7 +49,9 @@ local M = {}
 -- either — it only ever touches the network from `M.send()`/`M.
 -- set_key()`, both explicit user actions, never at `setup()` time
 -- (whose only side effect is binding its own keymaps), so it's simply
--- added last. `theme` is listed right
+-- added last. `scratch` has no ordering dependency either — `open()`
+-- creates its buffer lazily on first call, not at `setup()` time, so
+-- it's simply added at the end too. `theme` is listed right
 -- after `sanity`,
 -- deliberately, for two reasons that both point the same direction:
 -- its own setup() (which applies a colorscheme by default,
@@ -84,6 +86,7 @@ local CONFIGURABLE_LIBRARIES = {
   'chrome',
   'project',
   'ai',
+  'scratch',
 }
 
 --- opts: `{ theme = {...}, sanity = {...}, dashboard = {...}, icons =
@@ -92,7 +95,7 @@ local CONFIGURABLE_LIBRARIES = {
 --- {...}, whichkey = {...}, sidebar = {...}, notify = {...}, activitybar
 --- = {...}, lsp =
 --- {...}, completion = {...}, url = {...}, git = {...}, window = {...},
---- chrome = {...}, project = {...}, ai = {...} }` (all optional). Each sub-table is
+--- chrome = {...}, project = {...}, ai = {...}, scratch = {...} }` (all optional). Each sub-table is
 --- forwarded to that library's own `setup()`; see `mep.<name>.config.
 --- defaults` for each library's shape. Note: mep.treesitter's default
 --- `ensure_installed = true` means this can kick off background
@@ -143,6 +146,7 @@ local LAZY_LIBRARIES = {
   chrome = true,
   project = true,
   ai = true,
+  scratch = true,
   version = true,
 }
 

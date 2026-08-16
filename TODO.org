@@ -1,67 +1,17 @@
-* DONE Which-key support
-  Add a plugin to show keybindings in a popup when pressing keys. This will help users discover available commands and their associated keybindings.
-
-* DONE Generic Sidebar plugin
-  Add a plugin to build generic sidebars from which can be used to display buttons,
-  widgets, and other information. This will give the user the ability to create
-  their own sidebar layout. Should include the ability to color, and highlight
-  widgets, run functions on click, change appearance and show tooltip on hover,
-  and more. I'd like the user to be able to create sidebars with just buttons,
-  sidebars that animate into view, sidebars that can be resized, and more. The
-  sidebar should be able to be placed on the left or right side of the editor,
-  and should be able to be toggled on and off. The sidebar should also be able
-  to be split into multiple sections, each with its own set of buttons and
-  widgets. The sidebar should also be able to be collapsed and expanded, and
-  should be able to be resized. The sidebar should also be able to be pinned to
-  the top or bottom of the editor, and should be able to be hidden when not in
-  use. The sidebar should also be able to be customized with different colors,
-  fonts, and icons. The sidebar should also be able to support building a wide range of
-  sidebars, including but not limited to:
-  Notification, todo, test sidebars that animate out from a fixed, pinned button sidebar. Can you implement all of this.
-
-
-* DONE Setup lsp support
-
-  Add jump to definition, jump to references, and other lsp features. This will
-  help users navigate their code more efficiently. use bindings like gd, gD, gr, gi, etc. to jump to definition, declaration, references, implementation, etc.
-
 * TODO Add hints 
-  Add a plugin to show hints for locations to jump to when pressing keys. This
-  will help users navigate the editor more efficiently. Trigger with alt+f.
-  Allow to jump to line, jump to word, jump to window pane
-
-* TODO Buffer/Tab Bar support
-  Add plugins to configure the buffer/tab bar, allowing users to customize its
-  appearance and behavior. This will give the user the ability to create their
-  own buffer/tab bar layout. Should include the ability to color, and highlight widgets, run functions on click, change appearance and show tooltip on hover, and more.
-* DONE Nerdfont icons
-* TODO Use mep.icons in the sidebar/activitybar buttons (currently hardcoded emoji)
-* TODO Repl support
-  Alt+Enter If no repl open, split below or right, depending on current layout, and add terminal to that buffer, moving back to original buffer location
-* TODO Play button
-* TODO Org-roam plugin support
-* TODO Docs support
-* TODO Dap plugin support
-* TODO Snippet management
-* TODO Window management
-  - Manual layout management
-  - Auto layout management
-  - Investigate tabbed panes
-  - Bind Alt+h,j,k,l for selecting windows
-  - Bind Alt+Shift+h,j,k,l for smart resizing windows
-  - Bind Alt+Ctrl+h,j,k,l for smart swapping windows
-  - Add border around active window
-* TODO Markdown support
-* TODO Smart split support
-* DONE Url open support
-* TODO Highlight colors support
-* TODO zen mode
-* TODO TODOs
-  highlight TODOs and other todo keywords in code 
-* TODO Flash cards
-* TODO Leetcode
 * TODO Command picker
+* TODO Dap plugin support
+* TODO Docs support
 * TODO Filetree add/delete support
+* TODO Flash cards
 * TODO Help system
-* TODO Add git plugin
-* TODO Add git gutter support
+* TODO Highlight colors support
+* TODO Leetcode
+* TODO Markdown support
+* TODO Org-roam plugin support
+* TODO Play button
+* TODO Repl support
+* TODO Snippet management
+* TODO TODOs
+* TODO Use mep.icons in the sidebar/activitybar buttons (currently hardcoded emoji)
+* TODO zen mode

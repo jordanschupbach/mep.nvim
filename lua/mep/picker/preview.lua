@@ -17,6 +17,14 @@ local function focus_line(win, buf, lnum, total_lines)
   vim.api.nvim_buf_clear_namespace(buf, line_ns, 0, -1)
   pcall(vim.api.nvim_buf_add_highlight, buf, line_ns, 'MepPreviewLine', lnum - 1, 0, -1)
   if vim.api.nvim_win_is_valid(win) then
+    -- Setting `filetype` above (for syntax/treesitter highlighting) can
+    -- trigger a FileType autocmd that turns on folding for this window
+    -- (e.g. mep.org's headline foldexpr) — undesirable in a preview pane,
+    -- where the whole point is to show surrounding context around the
+    -- matched line, not a buffer collapsed to its default foldlevel.
+    -- Re-assert this on every call, since it's window-local and each new
+    -- preview re-triggers filetype detection.
+    vim.wo[win].foldenable = false
     pcall(vim.api.nvim_win_set_cursor, win, { lnum, 0 })
     pcall(vim.api.nvim_win_call, win, function()
       vim.cmd('normal! zz')

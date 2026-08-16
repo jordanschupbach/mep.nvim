@@ -15,6 +15,14 @@ M.defaults = {
     next = { '<C-n>', '<Down>', '<C-j>' },
     prev = { '<C-p>', '<Up>', '<C-k>' },
   },
+  -- Global trigger keymaps: bound outside the picker's own prompt window
+  -- (unlike `keymaps` above) to open one of the built-in pickers.
+  -- Unbound (empty list) by default — e.g. `triggers = { buffer_search =
+  -- { '/' } }` replaces Neovim's native `/` search with
+  -- mep.picker.buffer_search().
+  triggers = {
+    buffer_search = {},
+  },
 }
 
 local keys = require('mep.core.keys')

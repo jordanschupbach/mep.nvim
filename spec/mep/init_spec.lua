@@ -20,6 +20,7 @@ local theme_config = require('mep.theme.config')
 local chrome_config = require('mep.chrome.config')
 local project_config = require('mep.project.config')
 local ai_config = require('mep.ai.config')
+local scratch_config = require('mep.scratch.config')
 
 describe('mep (top-level setup fan-out)', function()
   local saved_leader,
@@ -43,7 +44,8 @@ describe('mep (top-level setup fan-out)', function()
     saved_theme_options,
     saved_chrome_options,
     saved_project_options,
-    saved_ai_options
+    saved_ai_options,
+    saved_scratch_options
   local orig_install_all, orig_install
   local orig_notify
   local orig_lsp_config, orig_lsp_enable, orig_diag_config
@@ -72,6 +74,7 @@ describe('mep (top-level setup fan-out)', function()
     saved_chrome_options = vim.deepcopy(chrome_config.options)
     saved_project_options = vim.deepcopy(project_config.options)
     saved_ai_options = vim.deepcopy(ai_config.options)
+    saved_scratch_options = vim.deepcopy(scratch_config.options)
     orig_notify = vim.notify
 
     -- mep.git.setup()'s default enable=true attaches mep.git.gutter to
@@ -155,6 +158,8 @@ describe('mep (top-level setup fan-out)', function()
     chrome_config.options = saved_chrome_options
     project_config.options = saved_project_options
     ai_config.options = saved_ai_options
+    scratch_config.options = saved_scratch_options
+    require('mep.scratch').reset()
     treesitter_install.install_all = orig_install_all
     treesitter_install.install = orig_install
     require('mep.filetree').reset()
@@ -235,6 +240,7 @@ describe('mep (top-level setup fan-out)', function()
     assert.is_true(dashboard_config.options.auto_open)
     assert.is_true(treesitter_config.options.highlight)
     assert.is_true(org_config.options.highlight)
+    assert.are.equal('scratch', scratch_config.options.name)
   end)
 
   it('setup() with no argument at all does not error', function()
@@ -353,6 +359,12 @@ describe('mep (top-level setup fan-out)', function()
     assert.are.same({ 'README.org', 'README.md' }, project_config.options.readme_names) -- untouched
   end)
 
+  it('forwards opts.scratch to mep.scratch.setup, deep-merged', function()
+    mep.setup({ scratch = { filetype = 'markdown' } })
+    assert.are.equal('markdown', scratch_config.options.filetype)
+    assert.are.equal('scratch', scratch_config.options.name) -- untouched
+  end)
+
   it('forwards opts.ai to mep.ai.setup, deep-merged', function()
     mep.setup({ ai = { provider = 'openai', providers = { openai = { model = 'gpt-4o-mini' } } } })
     assert.are.equal('openai', ai_config.options.provider)
@@ -400,6 +412,7 @@ describe('mep (top-level setup fan-out)', function()
     assert.are.equal(require('mep.chrome'), mep.chrome)
     assert.are.equal(require('mep.project'), mep.project)
     assert.are.equal(require('mep.ai'), mep.ai)
+    assert.are.equal(require('mep.scratch'), mep.scratch)
     assert.are.equal(require('mep.version'), mep.version)
   end)
 end)

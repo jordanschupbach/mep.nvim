@@ -4,6 +4,25 @@ M.defaults = {
   -- Keywords recognized (in order) as a headline's TODO state. cycle_todo
   -- steps through this list and then to "no keyword".
   todo_keywords = { 'TODO', 'DONE' },
+  -- Give each todo_keywords entry its own color in the buffer — real
+  -- org-mode's own look (TODO red, DONE green) generalized to whatever
+  -- keywords you configure. See mep.org.todohl. Set to false to leave
+  -- keywords uncolored (queries/org/highlights.scm's own static
+  -- TODO=@keyword/DONE=@comment captures still apply — just none of your
+  -- own custom states).
+  todo_highlight = true,
+  -- Highlight group each keyword (a key here, case-sensitive, matching
+  -- one in todo_keywords above) links to — any real highlight group: a
+  -- built-in one like below, a colorscheme's own, or one you define
+  -- yourself. A todo_keywords entry with no color here (e.g. a custom
+  -- state you added but didn't also color) cycles through
+  -- mep.org.todohl.LINKS instead, positionally within todo_keywords —
+  -- same fallback mep.org.headlinehl uses for headline levels past its
+  -- own fixed rotation.
+  todo_keyword_colors = {
+    TODO = 'DiagnosticError',
+    DONE = 'DiagnosticOk',
+  },
   -- Highlight org buffers via mep.treesitter (installing the `org`
   -- parser in the background if it isn't available yet — see
   -- mep.treesitter.config for what that needs).
@@ -92,6 +111,8 @@ M.defaults = {
       rename = { '<leader>rn' },
       diagnostic_prev = { '[d' },
       diagnostic_next = { ']d' },
+      diagnostic_prev_error = { '[e' },
+      diagnostic_next_error = { ']e' },
       diagnostic_float = { '<leader>le' },
     },
   },

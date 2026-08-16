@@ -76,6 +76,29 @@ describe('mep.lsp.keymaps', function()
       assert.is_true(called)
     end)
 
+    it('binds [e/]e to previous/next diagnostic filtered to ERROR severity', function()
+      local buf = make_buf()
+      vim.api.nvim_set_current_buf(buf)
+      local orig = { goto_prev = vim.diagnostic.goto_prev, goto_next = vim.diagnostic.goto_next }
+      local captured = {}
+      vim.diagnostic.goto_prev = function(opts)
+        captured.prev = opts
+      end
+      vim.diagnostic.goto_next = function(opts)
+        captured.next = opts
+      end
+
+      keymaps_mod.bind(buf, make_client(), config.defaults.keymaps, false)
+      vim.cmd('normal [e')
+      vim.cmd('normal ]e')
+
+      vim.diagnostic.goto_prev = orig.goto_prev
+      vim.diagnostic.goto_next = orig.goto_next
+
+      assert.are.same({ severity = vim.diagnostic.severity.ERROR }, captured.prev)
+      assert.are.same({ severity = vim.diagnostic.severity.ERROR }, captured.next)
+    end)
+
     it('sets a desc on every bound keymap', function()
       local buf = make_buf()
       keymaps_mod.bind(buf, make_client(), config.defaults.keymaps, false)

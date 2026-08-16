@@ -11,6 +11,10 @@ M.defaults = {
     collapse = { 'h', '<Left>' },
     close = { 'q', '<Esc>' },
     refresh = { 'R' },
+    add = { 'a' },
+    rename = { 'r' },
+    delete = { 'd' },
+    help = { '?' },
   },
 }
 

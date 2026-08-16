@@ -47,6 +47,8 @@ M.defaults = {
     format = { '<leader>lf' },
     diagnostic_prev = { '[d' },
     diagnostic_next = { ']d' },
+    diagnostic_prev_error = { '[e' },
+    diagnostic_next_error = { ']e' },
     diagnostic_float = { '<leader>le' },
   },
 }

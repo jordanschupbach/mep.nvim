@@ -224,15 +224,12 @@ local function wrap_zig_main(includes, body_lines)
 end
 
 --- `wrap_main` for Java: a deliberately *non*-`public` top-level class
---- (`class Main`, not `public class Main`) — a `public` class' name has
---- to match its source file's own basename exactly, which a random
---- `vim.fn.tempname()` path never will; a package-private one has no
---- such constraint, confirmed empirically (`javac -d <dir> <anything>.
---- java` compiles a bare `class Main { ... }` from any filename just
---- fine). `run_compiled_cmd` below always looks for `Main` specifically
---- — a self-contained `:main no` block (the default) needs its own
---- top-level class named exactly that for the same reason, documented
---- there.
+--- (`class Main`, not `public class Main`) — this doesn't strictly need
+--- to dodge the "public class name must match its file's basename" rule
+--- the way it once did (see `java_class_name`/`M.languages.java.
+--- compile_cmd` below, which now rename the source file to match
+--- whatever class name is actually detected), it just keeps the wrapped
+--- entry point's own name boring and predictable.
 local function wrap_java_main(includes, body_lines)
   local lines = {}
   for _, inc in ipairs(includes) do
@@ -281,6 +278,34 @@ end
 --- `do` block this wraps everything in, where a bare (non-`let`)
 --- binding is a syntax error. `:var` and `:main yes` together isn't
 --- supported for Haskell as a result; either alone works fine.
+--- The top-level class name `M.languages.java` should compile and run:
+--- `public class NAME` first (the common case for a self-contained
+--- `:main no` block — a pasted-in real Java example almost always
+--- declares its class `public`, and `javac` requires *that* class'
+--- name to match its source file's own basename exactly), falling back
+--- to a bare `class NAME` (covers `wrap_java_main`'s own package-private
+--- `class Main`, and a self-contained block that skips `public` too),
+--- and finally `'Main'` if neither pattern matches at all (shouldn't
+--- happen for valid Java, but keeps `run_compiled_cmd` looking for the
+--- same name compilation would have failed on anyway). `%f[%w]` (a Lua
+--- pattern frontier) keeps this from matching `class` inside a longer
+--- identifier like `subclass`.
+local function java_class_name(lines)
+  for _, line in ipairs(lines) do
+    local name = line:match('public%s+class%s+([%a_][%w_]*)')
+    if name then
+      return name
+    end
+  end
+  for _, line in ipairs(lines) do
+    local name = line:match('%f[%w]class%s+([%a_][%w_]*)')
+    if name then
+      return name
+    end
+  end
+  return 'Main'
+end
+
 local function wrap_haskell_main(includes, body_lines)
   local lines = {}
   for _, inc in ipairs(includes) do
@@ -671,20 +696,36 @@ M.languages = {
   -- ships both together, the same "assume the paired tool is there too"
   -- convention `rust`'s own entry already makes for `cargo` (needed by
   -- rust-analyzer, never checked by `execute` itself either).
+  --
+  -- `detect_class` (see `java_class_name` above) is `M.execute`'s hook
+  -- for figuring out which class both `compile_cmd` and
+  -- `run_compiled_cmd` need to agree on — an explicit `:classname`
+  -- header arg wins if given (an escape hatch for a body `java_class_
+  -- name`'s simple line-pattern scan can't get right, e.g. more than one
+  -- top-level class), otherwise it's detected from the script text
+  -- itself. `compile_cmd` copies the already-written `source_path` to a
+  -- sibling `<ClassName>.java` before compiling it — a `public class
+  -- HelloWorld` (the common shape of a pasted-in, self-contained `:main
+  -- no` example) has to live in a file named exactly `HelloWorld.java`
+  -- for `javac` to accept it at all, which a random `vim.fn.tempname()`
+  -- path never is on its own; a package-private class has no such
+  -- constraint but gets the same treatment regardless, same "always
+  -- copy" tradeoff `M.languages.nim`/`M.languages.d`'s own `compile_cmd`/
+  -- `run_cmd` already make for their own filename constraints (including
+  -- leaving the renamed copy behind uncleaned — `execute`'s own cleanup
+  -- only ever deletes the original `source_path`).
   java = {
     executable = 'javac',
     extension = '.java',
     compiled = true,
-    compile_cmd = function(exe, source_path, binary_path)
-      return { exe, '-d', binary_path, source_path }
+    detect_class = java_class_name,
+    compile_cmd = function(exe, source_path, binary_path, class_name)
+      local named_path = vim.fn.fnamemodify(source_path, ':h') .. '/' .. class_name .. '.java'
+      vim.fn.writefile(vim.fn.readfile(source_path), named_path)
+      return { exe, '-d', binary_path, named_path }
     end,
-    -- Always looks for a top-level class named exactly `Main` — the one
-    -- `wrap_java_main` itself always emits; a self-contained `:main no`
-    -- block (the default) needs to name its own top-level class `Main`
-    -- too, for this to find it (`javac -d` doesn't care what a source
-    -- *file* is named, only what `java -cp` is later told to look for).
-    run_compiled_cmd = function(binary_path)
-      return { 'java', '-cp', binary_path, 'Main' }
+    run_compiled_cmd = function(binary_path, class_name)
+      return { 'java', '-cp', binary_path, class_name }
     end,
     var_stmt = function(name, literal)
       return string.format('var %s = %s;', name, literal)
@@ -1131,8 +1172,13 @@ function M.execute(bufnr, lnum, on_done)
 
   if lang_def.compiled then
     local binary_path = vim.fn.tempname()
+    -- Only meaningful for Java (see `M.languages.java`'s own `detect_class`/
+    -- `compile_cmd`/`run_compiled_cmd`) — every other compiled language's
+    -- hooks take a fixed, smaller argument list and simply ignore this
+    -- extra trailing one.
+    local class_name = args.classname or (lang_def.detect_class and lang_def.detect_class(script_lines))
     local compile_stderr = {}
-    local compile_cmd = lang_def.compile_cmd and lang_def.compile_cmd(exe, source_path, binary_path)
+    local compile_cmd = lang_def.compile_cmd and lang_def.compile_cmd(exe, source_path, binary_path, class_name)
       or { exe, source_path, '-o', binary_path }
     core.job.spawn({
       cmd = compile_cmd,
@@ -1147,7 +1193,7 @@ function M.execute(bufnr, lnum, on_done)
         end
         local stdout, stderr = {}, {}
         core.job.spawn({
-          cmd = lang_def.run_compiled_cmd and lang_def.run_compiled_cmd(binary_path) or { binary_path },
+          cmd = lang_def.run_compiled_cmd and lang_def.run_compiled_cmd(binary_path, class_name) or { binary_path },
           on_stdout = function(line)
             stdout[#stdout + 1] = line
           end,

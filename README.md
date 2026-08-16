@@ -123,6 +123,26 @@ and `:command<Enter>` hints get their own color. It runs on whatever
 - `MepDashboardCommand` — `:command<Enter>` hints (links to `Special`)
 - `MepDashboardLink` — URLs (links to `Underlined`)
 
+### `mep.scratch` — a single, persistent throwaway notepad buffer
+
+`:MepScratch` / `require('mep.scratch').open()` switches the current
+window to a scratch buffer, creating it the first time it's called.
+Unlike `:enew`'s own buffer (unnamed, and wiped the moment you switch
+away from it if `'hidden'` is off), this one is real (`buftype=nofile`,
+`swapfile=false` — never actually touches disk) but reused across every
+`open()` call in the session (`bufhidden=hide`, not `'wipe'`), so its
+content survives switching away and back — splitting it, closing the
+window, or navigating to another buffer and back all behave exactly like
+any other buffer.
+
+```lua
+require('mep.scratch').setup({}) -- name='scratch', filetype=''
+require('mep.scratch').setup({ filetype = 'markdown' }) -- basic syntax highlighting while jotting notes
+```
+
+`require('mep.scratch').reset()` discards the current scratch buffer (and
+its content) so the next `open()` starts fresh with a brand new one.
+
 ### `mep.icons` — file/directory icons, no special font required
 
 Looks up an icon glyph for a file (by exact basename, then by lowercased
@@ -182,9 +202,16 @@ project doesn't walk the whole filesystem up front.
 | `h` / `<Left>`  | Collapse an expanded directory, or jump to its parent            |
 | `q` / `<Esc>`   | Close the tree                                                  |
 | `R`             | Refresh                                                          |
+| `a`             | Create a file/directory (prompts for a name relative to the node under the cursor; trailing `/` makes a directory) |
+| `r`             | Rename the file/directory under the cursor (prompts, pre-filled with its current name) |
+| `d`             | Delete the file/directory under the cursor (confirms first; directories are removed recursively) |
+| `?`             | Toggle a popup listing every keymap above (dismiss with `q`/`<Esc>`/`?`) |
+
+A horizontal rule and a "Press ? for help" hint sit below the tree
+itself, at the bottom of the panel.
 
 All configurable via `require('mep.filetree').setup({...})` —
-`width`, `root`, `show_hidden`, and `keymaps.open`/`expand`/`collapse`/`close`/`refresh`
+`width`, `root`, `show_hidden`, and `keymaps.open`/`expand`/`collapse`/`close`/`refresh`/`add`/`rename`/`delete`/`help`
 (each a list of lhs strings). See `lua/mep/filetree/config.lua` for the
 full defaults.
 
@@ -232,6 +259,20 @@ the full defaults table (`debounce_ms.static`/`debounce_ms.dynamic`,
 `keymaps.select`/`close`/`next`/`prev`, each a list of lhs strings mapped
 in both insert and normal mode). Picker functions work with sensible
 defaults even if `setup()` is never called.
+
+#### Trigger keymaps (outside the picker, e.g. replacing `/`)
+
+`triggers.buffer_search` (unbound by default) is a list of normal-mode lhs
+strings that open `buffer_search()` from wherever you already are —
+useful for replacing Neovim's native `/` command-line search with a fuzzy
+picker over the buffer's lines:
+
+```lua
+require('mep.picker').setup({ triggers = { buffer_search = { '/' } } })
+```
+
+Applied by `lua/mep/picker/keymaps.lua`, wired up from `setup()` the same
+way `mep.sanity`'s keymaps are.
 
 #### Highlight groups
 
@@ -684,11 +725,18 @@ structure editing below works immediately, even before (or without) the
   from nvim-orgmode's own query, which leans on custom Lua predicates
   (`#org-is-headline-level?` etc.) that only exist if that plugin
   registers them; this one uses only predicates built into Neovim's query
-  engine, so it works standalone — the tradeoff is all headline levels
-  render in one heading color rather than nvim-orgmode's per-level ones,
-  and only your configured default (`TODO`/`DONE`) keywords are
-  recognized by the *static* query (the structural TODO cycling above
-  still respects a custom `todo_keywords` list either way). Priority
+  engine, so it works standalone — the tradeoff is only the two default
+  (`TODO`/`DONE`) keywords are recognized by the *static* query (the
+  structural TODO cycling above still respects a custom `todo_keywords`
+  list either way). Per-level headline colors (`headline_highlight`,
+  `mep.org.headlinehl`) and per-keyword TODO-state colors
+  (`todo_highlight`/`todo_keyword_colors`, `mep.org.todohl`) sit on top
+  of that same static query as their own extmarks instead — real
+  org-mode's own look (TODO red, DONE green) by default, and fully
+  configurable: `todo_keyword_colors = { TODO = 'DiagnosticError', DONE =
+  'DiagnosticOk' }` links a keyword to any real highlight group, and a
+  `todo_keywords` entry with no color there cycles through a 6-color
+  fallback palette instead. Priority
   cookies (`[#A]`) highlight as `@constant` — matched by literal text
   since the grammar has no dedicated priority node, same tradeoff as the
   TODO/DONE matching above (a title word that happens to look exactly
@@ -834,8 +882,19 @@ structure editing below works immediately, even before (or without) the
     ```
 
 ```lua
-require('mep.org').setup({}) -- todo_keywords={'TODO','DONE'}, highlight=true, fold=true, sort_criteria='alpha', priorities={'A','B','C'}, tags={}, tags_column=77, conceal_links=true, capture_templates={}, agenda_files={}, deadline_warning_days=14, attach_dir='data', polyglot={keymaps={...}}
+require('mep.org').setup({}) -- todo_keywords={'TODO','DONE'}, todo_highlight=true, todo_keyword_colors={TODO='DiagnosticError', DONE='DiagnosticOk'}, highlight=true, fold=true, sort_criteria='alpha', priorities={'A','B','C'}, tags={}, tags_column=77, conceal_links=true, capture_templates={}, agenda_files={}, deadline_warning_days=14, attach_dir='data', polyglot={keymaps={...}}
 require('mep.org').setup({ todo_keywords = { 'TODO', 'DOING', 'DONE' }, tags = { 'work', 'home', 'urgent' } })
+require('mep.org').setup({
+  todo_keywords = { 'TODO', 'DOING', 'WAITING', 'DONE', 'CANCELLED' },
+  -- Any keyword left out here (WAITING/CANCELLED) cycles through
+  -- mep.org.todohl.LINKS instead — still gets its own distinct color,
+  -- just not one you picked.
+  todo_keyword_colors = {
+    TODO = 'DiagnosticError',
+    DOING = 'DiagnosticWarn',
+    DONE = 'DiagnosticOk',
+  },
+})
 require('mep.org').setup({ capture_templates = {
   { key = 't', description = 'Task', target = { file = '~/todo.org' }, template = '* TODO %? %a' },
 } })
@@ -892,6 +951,7 @@ require('mep.org').setup({ polyglot = false }) -- no per-language LSP bridging; 
 | `K` / `<C-k>`           | normal (insert for `<C-k>`) | Poly mode: hover / signature help |
 | `<leader>rn`            | normal | Poly mode: rename (prompts a new name) |
 | `[d` / `]d` / `<leader>le` | normal | Poly mode: previous/next diagnostic, show diagnostic float (diagnostics are mirrored onto the org buffer directly) |
+| `[e` / `]e`             | normal | Poly mode: previous/next diagnostic with severity ERROR |
 
 All configurable via `require('mep.org').setup({ keymaps = {...} })` —
 see `lua/mep/org/config.lua` for the full defaults. `mep.org.polyglot`'s
@@ -1292,6 +1352,7 @@ require('mep.lsp').setup({ servers = { my_server = { cmd = {'my-ls'}, filetypes 
 | `<leader>lt` | normal | Goto type definition |
 | `<leader>le` | normal | Show the diagnostic under the cursor |
 | `[d` / `]d` | normal | Previous/next diagnostic |
+| `[e` / `]e` | normal | Previous/next diagnostic with severity ERROR |
 
 All configurable via `require('mep.lsp').setup({ keymaps = {...} })` —
 see `lua/mep/lsp/config.lua` for the full defaults. `enable` mirrors
@@ -1928,6 +1989,7 @@ require('mep').setup({
   git = { sidebar = { position = 'left' } },    -- mep.git.config.defaults
   window = { manual = { resize_step = 5 } },    -- mep.window.config.defaults
   project = { readme_names = { 'readme.txt' } }, -- mep.project.config.defaults
+  scratch = { filetype = 'markdown' },          -- mep.scratch.config.defaults
 })
 ```
 
@@ -1973,6 +2035,7 @@ keymaps for you):
 vim.keymap.set('n', '<leader>ff', '<cmd>MepFileTreeToggle<cr>')
 vim.keymap.set('n', '<leader>pf', '<cmd>MepFindFiles<cr>')
 vim.keymap.set('n', '<leader>bb', '<cmd>MepBuffers<cr>')
+vim.keymap.set('n', '<leader>bs', '<cmd>MepScratch<cr>')
 vim.keymap.set('n', '<leader>fg', '<cmd>MepLiveGrep<cr>')
 vim.keymap.set('n', '<leader>fb', '<cmd>MepBufferSearch<cr>')
 vim.keymap.set('n', '<leader>po', '<cmd>MepProjects<cr>')

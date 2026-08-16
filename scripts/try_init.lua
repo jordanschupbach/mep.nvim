@@ -26,11 +26,15 @@ vim.o.cursorline = true
 -- `just try` launch — fine for real use, too heavy for a quick scratch
 -- session, so this opts out; highlighting still activates normally for
 -- whatever parsers are already available.
-require('mep').setup({ treesitter = { ensure_installed = false } })
+require('mep').setup({
+  treesitter = { ensure_installed = false },
+  picker = { triggers = { buffer_search = { '/' } } },
+})
 
 vim.keymap.set('n', '<leader>ff', '<cmd>MepFileTreeToggle<cr>', { desc = 'mep: toggle file tree' })
 vim.keymap.set('n', '<leader>pf', '<cmd>MepFindFiles<cr>', { desc = 'mep: find files' })
 vim.keymap.set('n', '<leader>bb', '<cmd>MepBuffers<cr>', { desc = 'mep: open buffers' })
+vim.keymap.set('n', '<leader>bs', '<cmd>MepScratch<cr>', { desc = 'mep: open scratch buffer' })
 vim.keymap.set('n', '<leader>fg', '<cmd>MepLiveGrep<cr>', { desc = 'mep: live grep' })
 vim.keymap.set('n', '<leader>fb', '<cmd>MepBufferSearch<cr>', { desc = 'mep: buffer search' })
 vim.keymap.set('n', '<leader>po', '<cmd>MepProjects<cr>', { desc = 'mep: switch projects' })

@@ -48,6 +48,7 @@ local block_mod = require('mep.org.block')
 local blockhl = require('mep.org.blockhl')
 local resultshl = require('mep.org.resultshl')
 local headlinehl = require('mep.org.headlinehl')
+local todohl = require('mep.org.todohl')
 local footnote_mod = require('mep.org.footnote')
 local macro_mod = require('mep.org.macro')
 local include_mod = require('mep.org.include')
@@ -88,6 +89,7 @@ M.block = block_mod
 M.blockhl = blockhl
 M.resultshl = resultshl
 M.headlinehl = headlinehl
+M.todohl = todohl
 M.footnote = footnote_mod
 M.macro = macro_mod
 M.include = include_mod
@@ -460,6 +462,21 @@ local function apply_headline_highlight(bufnr, options)
   })
 end
 
+local function apply_todo_highlight(bufnr, options)
+  if not options.todo_highlight then
+    return
+  end
+  todohl.define_default_hl()
+  todohl.apply(bufnr, options.todo_keywords, options.todo_keyword_colors)
+  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'InsertLeave' }, {
+    group = augroup,
+    buffer = bufnr,
+    callback = function()
+      todohl.apply(bufnr, options.todo_keywords, options.todo_keyword_colors)
+    end,
+  })
+end
+
 local function apply_fold(bufnr, options)
   -- Explicitly reset to Vim's own default ('manual') when disabled,
   -- rather than just skipping — 'foldmethod' is window-local, so a
@@ -554,12 +571,13 @@ local function activate_org_buffer(bufnr, options)
   apply_block_highlight(bufnr, options)
   apply_results_highlight(bufnr, options)
   apply_headline_highlight(bufnr, options)
+  apply_todo_highlight(bufnr, options)
   apply_polyglot(bufnr, options)
 end
 
 --- Configure mep.org. See mep.org.config.defaults for
---- todo_keywords/highlight/fold/sort_criteria/priorities/tags/
---- tags_column/conceal_links/keymaps.
+--- todo_keywords/todo_highlight/todo_keyword_colors/highlight/fold/
+--- sort_criteria/priorities/tags/tags_column/conceal_links/keymaps.
 function M.setup(opts)
   local options = config.setup(opts)
 

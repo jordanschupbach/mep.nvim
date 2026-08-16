@@ -39,6 +39,12 @@ function M.bind(bufnr, client, keymaps, completion_enabled)
   end, 'lsp: format')
   map_all('n', keymaps.diagnostic_prev, vim.diagnostic.goto_prev, 'lsp: previous diagnostic')
   map_all('n', keymaps.diagnostic_next, vim.diagnostic.goto_next, 'lsp: next diagnostic')
+  map_all('n', keymaps.diagnostic_prev_error, function()
+    vim.diagnostic.goto_prev({ severity = vim.diagnostic.severity.ERROR })
+  end, 'lsp: previous error')
+  map_all('n', keymaps.diagnostic_next_error, function()
+    vim.diagnostic.goto_next({ severity = vim.diagnostic.severity.ERROR })
+  end, 'lsp: next error')
   map_all('n', keymaps.diagnostic_float, vim.diagnostic.open_float, 'lsp: show diagnostic')
 
   if completion_enabled and client.supports_method and client:supports_method('textDocument/completion') then

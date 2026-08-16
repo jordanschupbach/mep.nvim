@@ -512,6 +512,31 @@ describe('mep.org.polyglot', function()
       vim.notify = orig_notify
       assert.is_true(warned)
     end)
+
+    it('binds [e/]e to previous/next diagnostic filtered to ERROR severity', function()
+      local bufnr = buf({ 'plain text' })
+      polyglot.setup_buffer(bufnr, {
+        keymaps = { diagnostic_prev_error = { '[e' }, diagnostic_next_error = { ']e' } },
+      })
+
+      local orig = { goto_prev = vim.diagnostic.goto_prev, goto_next = vim.diagnostic.goto_next }
+      local captured = {}
+      vim.diagnostic.goto_prev = function(opts)
+        captured.prev = opts
+      end
+      vim.diagnostic.goto_next = function(opts)
+        captured.next = opts
+      end
+
+      get_callback(bufnr, 'n', '[e')()
+      get_callback(bufnr, 'n', ']e')()
+
+      vim.diagnostic.goto_prev = orig.goto_prev
+      vim.diagnostic.goto_next = orig.goto_next
+
+      assert.are.same({ severity = vim.diagnostic.severity.ERROR }, captured.prev)
+      assert.are.same({ severity = vim.diagnostic.severity.ERROR }, captured.next)
+    end)
   end)
 
   describe('status_widget', function()

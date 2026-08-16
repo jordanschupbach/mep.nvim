@@ -1171,6 +1171,67 @@ describe('mep.org.org', function()
     end)
   end)
 
+  describe('todo keyword color highlight', function()
+    local todohl = require('mep.org.todohl')
+    local NS = vim.api.nvim_create_namespace('mep_org_todo')
+
+    it('colors each configured keyword using todo_keyword_colors by default', function()
+      stub_install()
+      org.setup({ fold = false })
+
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_set_current_buf(buf)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '* TODO one', '* DONE two' })
+      vim.bo[buf].filetype = 'org'
+
+      local marks = vim.api.nvim_buf_get_extmarks(buf, NS, 0, -1, { details = true })
+      table.sort(marks, function(a, b)
+        return a[2] < b[2]
+      end)
+      assert.are.equal(2, #marks)
+      assert.are.equal('DiagnosticError', marks[1][4].hl_group)
+      assert.are.equal('DiagnosticOk', marks[2][4].hl_group)
+    end)
+
+    it('respects a custom todo_keywords/todo_keyword_colors config', function()
+      stub_install()
+      org.setup({
+        fold = false,
+        todo_keywords = { 'TODO', 'WAITING', 'DONE' },
+        todo_keyword_colors = { TODO = 'DiagnosticError', WAITING = 'DiagnosticWarn', DONE = 'DiagnosticOk' },
+      })
+
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_set_current_buf(buf)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '* WAITING blocked' })
+      vim.bo[buf].filetype = 'org'
+
+      local marks = vim.api.nvim_buf_get_extmarks(buf, NS, 0, -1, { details = true })
+      assert.are.equal(1, #marks)
+      assert.are.equal('DiagnosticWarn', marks[1][4].hl_group)
+    end)
+
+    it('is skipped entirely when todo_highlight = false', function()
+      stub_install()
+      org.setup({ fold = false, todo_highlight = false })
+
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_set_current_buf(buf)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '* TODO one' })
+      vim.bo[buf].filetype = 'org'
+
+      assert.are.same({}, vim.api.nvim_buf_get_extmarks(buf, NS, 0, -1, {}))
+    end)
+
+    it('every MepOrgTodoKeywordN group resolves to a highlight group after setup', function()
+      stub_install()
+      org.setup({ fold = false })
+      for _, group in ipairs(todohl.hl_groups) do
+        assert.is_not_nil(vim.api.nvim_get_hl(0, { name = group }))
+      end
+    end)
+  end)
+
   describe('Phase 11/12 keymaps', function()
     local orig_input, orig_select
 

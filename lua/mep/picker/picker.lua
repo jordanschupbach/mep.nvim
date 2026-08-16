@@ -4,16 +4,20 @@
 --- same way `mep.core.core` aggregates its building blocks.
 local Picker = require('mep.picker.engine')
 local config = require('mep.picker.config')
+local keymaps = require('mep.picker.keymaps')
 
 local M = {}
 M.Picker = Picker
 
---- Configure the picker library: query debounce timings and the prompt
---- keymaps (select/close/next/prev), each a list of lhs strings mapped in
---- both insert and normal mode. See mep.picker.config.defaults. Picker
---- functions work with sensible defaults even if this is never called.
+--- Configure the picker library: query debounce timings, the prompt
+--- keymaps (select/close/next/prev), and trigger keymaps (e.g.
+--- `triggers.buffer_search`) that open a picker from outside its own
+--- prompt window. See mep.picker.config.defaults. Picker functions work
+--- with sensible defaults even if this is never called.
 function M.setup(opts)
-  return config.setup(opts)
+  local options = config.setup(opts)
+  keymaps.apply(options.triggers)
+  return options
 end
 
 --- Build and open a picker from raw `Picker.new`-style opts. Use this to

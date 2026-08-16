@@ -1260,6 +1260,53 @@ describe('mep.org.babel', function()
       vim.fn.delete(source_path)
     end)
 
+    it('renames a self-contained public class to <ClassName>.java and runs that class', function()
+      local buf = make_buf({
+        '#+begin_src java',
+        'public class HelloWorld {',
+        '  public static void main(String[] args) {',
+        '    System.out.println("hi");',
+        '  }',
+        '}',
+        '#+end_src',
+      })
+      babel.execute(buf, 1)
+      local compile_call = calls[1]
+      local binary_path = compile_call.cmd[3]
+      local source_path = compile_call.cmd[4]
+      assert.matches('/HelloWorld%.java$', source_path)
+      assert.are.same({
+        'public class HelloWorld {',
+        '  public static void main(String[] args) {',
+        '    System.out.println("hi");',
+        '  }',
+        '}',
+      }, vim.fn.readfile(source_path))
+      vim.fn.delete(source_path)
+
+      calls[1].opts.on_exit(100, 0)
+      assert.are.same({ 'java', '-cp', binary_path, 'HelloWorld' }, calls[2].cmd)
+    end)
+
+    it(':classname overrides class detection', function()
+      local buf = make_buf({
+        '#+begin_src java :classname Other',
+        'public class HelloWorld {',
+        '  public static void main(String[] args) {}',
+        '}',
+        '#+end_src',
+      })
+      babel.execute(buf, 1)
+      local compile_call = calls[1]
+      local binary_path = compile_call.cmd[3]
+      local source_path = compile_call.cmd[4]
+      assert.matches('/Other%.java$', source_path)
+      vim.fn.delete(source_path)
+
+      calls[1].opts.on_exit(100, 0)
+      assert.are.same({ 'java', '-cp', binary_path, 'Other' }, calls[2].cmd)
+    end)
+
     it('recursively deletes the class-file directory (not just a single binary) after the run finishes', function()
       local orig_delete = vim.fn.delete
       local deletes = {}

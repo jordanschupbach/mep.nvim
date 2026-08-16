@@ -90,6 +90,26 @@ describe('mep.picker.preview', function()
       assert.are.equal('python', vim.bo[buf].filetype)
       assert.are.equal(2, vim.api.nvim_win_get_cursor(win)[1])
     end)
+
+    it('disables folding so a source filetype with fold-by-default content is fully visible', function()
+      -- Reproduces the bug where previewing an org buffer (whose FileType
+      -- autocmd turns on an expr foldmethod that starts closed) left the
+      -- preview showing only the outermost folded headline text instead
+      -- of the buffer's actual lines.
+      local src = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_lines(src, 0, -1, false, { '* Heading', 'body line 1', 'body line 2' })
+      vim.bo[src].filetype = 'org'
+
+      vim.wo[win].foldmethod = 'manual'
+      vim.api.nvim_win_call(win, function()
+        vim.cmd('normal! zf2j')
+      end)
+      assert.is_true(vim.wo[win].foldenable)
+
+      preview.show_buffer(buf, win, src, 1)
+
+      assert.is_false(vim.wo[win].foldenable)
+    end)
   end)
 
   describe('clear', function()

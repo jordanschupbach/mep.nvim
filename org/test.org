@@ -5,12 +5,12 @@
 #include <iostream>
 
 int main() {
-    std::cout << "Hello, world";
+    std::cout << "Hellozz, world";
     return 0;
 }
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozz, world
 
 * C Main File Example
 
@@ -19,22 +19,22 @@ int main() {
 #include <stdio.h>
 
 int main() {
-    printf("Hello, world");
+    printf("Hellozz, world");
     return 0;
 }
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozz, world
 
 
 * C Script Example
 
 #+name: Hello, world in C (no main)
 #+BEGIN_SRC C :main yes :results output :includes <stdio.h>
-printf("Hello, world");
+printf("Hellozz, world");
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozz, world
 
 * Ruby Example
 
@@ -49,37 +49,37 @@ puts("Hellozzz, world")
 
 #+name: Hello, world in Perl
 #+BEGIN_SRC perl :results output
-print("Hello, world");
+print("Hellozz, world");
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozz, world
 
 * R Example
 
 #+name: Hello, world in R
 #+BEGIN_SRC R :results output
-print("Hello, world")
+print("Hellozzz, world")
 #+END_SRC
 #+RESULTS:
-: [1] "Hello, world"
+: [1] "Hellozzz, world"
 
 * PHP Example
 
 #+name: Hello, world in PHP
 #+BEGIN_SRC php :results output
-echo "Hello, world";
+echo "Hellozzz, world";
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozzz, world
 
 * Rust Example
 
 #+name: Hello, world in Rust
 #+BEGIN_SRC rust :main yes :results output
-println!("Hello, world");
+println!("Hellozzz, world");
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozzz, world
 
 * Go Example
 
@@ -90,155 +90,165 @@ package main
 import "fmt"
 
 func main() {
-    fmt.Println("Hello, World!");
+    fmt.Println("Hellozzz, World!");
 }
 #+END_SRC
 #+RESULTS:
-: Hello, World!
+: Hellozzz, World!
 
 * TypeScript Example
 
 #+name: Hello, world in TypeScript
 #+BEGIN_SRC typescript :results output
-const message: string = "Hello, world";
+const message: string = "Hellozzzz, world";
 console.log(message);
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozzzz, world
 
 * Elixir Example
 
 #+name: Hello, world in Elixir
 #+BEGIN_SRC elixir :results output
-IO.puts("Hello, world")
+IO.puts("Hellozzz, world")
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozzz, world
 
 * Julia Example
 
 #+name: Hello, world in Julia
 #+BEGIN_SRC julia :results output
-println("Hello, world")
+println("Hellozzz, world")
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozzz, world
 
 * Clojure Example
 
 #+name: Hello, world in Clojure
 #+BEGIN_SRC clojure :results output
-(println "Hello, world")
+(println "Hellozzzz, world")
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozzzz, world
 
 * C# Example
 
 #+name: Hello, world in C#
 #+BEGIN_SRC csharp :results output
-Console.WriteLine("Hello, world");
+Console.WriteLine("Hellozzzz, world");
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozzzz, world
 
 * Fortran Example
 
 #+name: Hello, world in Fortran
 #+BEGIN_SRC fortran :results output
 program hello
-  print *, "Hello, world"
+  print *, "Hellozzz, world"
 end program hello
 #+END_SRC
 #+RESULTS:
-:  Hello, world
+:  Hellozzz, world
 
 * Scala Example
 
 #+name: Hello, world in Scala
 #+BEGIN_SRC scala :main yes :results output
-println("Hello, world")
+println("Hellozz, world")
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozz, world
 
 * Python Example
 
 #+name: Hello, world in Python
 #+BEGIN_SRC python :results output
-print("Hello, world")
+print("Hellozzz, world")
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozzz, world
 
 * Zig Example
 
 #+name: Hello, world in Zig
 #+BEGIN_SRC zig :main yes :results output
-try stdout.writeAll("Hello, world\n");
+try stdout.writeAll("Hellozzz, world\n");
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozzz, world
 
 * Nim Example
 
 #+name: Hello, world in Nim
 #+BEGIN_SRC nim :results output
-echo "Hello, world"
+echo "Hellozzz, world"
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozzz, world
 
 * Crystal Example
 
 #+name: Hello, world in Crystal
 #+BEGIN_SRC crystal :results output
-puts "Hello, world"
+puts "Hellozzz, world"
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozzz, world
 
 * Java Example
 
 #+name: Hello, world in Java
-#+BEGIN_SRC java :main yes :results output
-System.out.println("Hello, world");
+#+BEGIN_SRC java yes :classname HelloWorld :results output
+// System.out.println("Hello, world");
+public class HelloWorld {
+    public static void main(String[] args) {
+        System.out.println("Hellozzz, World!");
+    }
+}
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozzz, World!
 
 * Kotlin Example
 
 #+name: Hello, world in Kotlin
 #+BEGIN_SRC kotlin :results output
-println("Hello, world")
+println("Hellozzz, world")
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozzz, world
 
 * Haskell Example
 
 #+name: Hello, world in Haskell
-#+BEGIN_SRC haskell :main yes :results output
-putStrLn "Hello, world"
+#+BEGIN_SRC haskell :results output
+main :: IO ()
+main = putStrLn "Hellozzz, World!"
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozzz, World!
 
 * OCaml Example
 
 #+name: Hello, world in OCaml
 #+BEGIN_SRC ocaml :results output
-print_string "Hello, world\n";;
+print_string "Hellozzz, world\n";;
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozzz, world
 
 * D Example
 
 #+name: Hello, world in D
-#+BEGIN_SRC d :main yes :results output
-writeln("Hello, world");
+#+BEGIN_SRC d :results output
+import std.stdio;
+
+void main() {
+    writeln("Hellozzz, World!");
+}
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozzz, World!

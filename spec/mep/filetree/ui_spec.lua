@@ -131,5 +131,60 @@ describe('mep.filetree.ui', function()
       local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, {})
       assert.are.equal(0, #marks) -- the single remaining node is a file, not a dir
     end)
+
+    it('renders no footer when no window is given', function()
+      local nodes = { { name = 'a', is_dir = false, depth = 0 } }
+      ui.render(buf, nodes)
+
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      assert.are.equal(1, #lines)
+    end)
+
+    it('pads the buffer out to the window height, pinning the rule and hint to its last two rows', function()
+      local nodes = { { name = 'a', is_dir = false, depth = 0 } }
+      ui.render(buf, nodes, win)
+
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      local win_height = vim.api.nvim_win_get_height(win)
+      assert.are.equal(win_height, #lines)
+      assert.matches('a', lines[1])
+      for i = 2, win_height - 2 do
+        assert.are.equal('', lines[i]) -- blank padding between the tree and the footer
+      end
+      assert.are.equal('', (lines[win_height - 1]:gsub('─', ''))) -- the rule
+      assert.are.equal('Press ? for help', lines[win_height])
+    end)
+
+    it('sizes the rule to the window width', function()
+      ui.render(buf, {}, win)
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      local rule = lines[#lines - 1]
+      assert.are.equal(vim.api.nvim_win_get_width(win), vim.fn.strdisplaywidth(rule))
+    end)
+
+    it('highlights only the rule and hint rows with MepFiletreeHint, not the blank padding', function()
+      ui.render(buf, { { name = 'a', is_dir = false, depth = 0 } }, win)
+
+      local ns = vim.api.nvim_get_namespaces()['mep_filetree_hint']
+      local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, {})
+      local win_height = vim.api.nvim_win_get_height(win)
+      assert.are.equal(2, #marks)
+      assert.are.equal(win_height - 2, marks[1][2]) -- 0-indexed row: the rule
+      assert.are.equal(win_height - 1, marks[2][2]) -- 0-indexed row: the hint text
+    end)
+
+    it('does not pad when the tree already fills the window, appending the footer right after it', function()
+      local win_height = vim.api.nvim_win_get_height(win)
+      local nodes = {}
+      for i = 1, win_height do
+        nodes[i] = { name = 'file' .. i, is_dir = false, depth = 0 }
+      end
+      ui.render(buf, nodes, win)
+
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      assert.are.equal(win_height + 2, #lines) -- every node, plus the footer, no padding
+      assert.are.equal('', (lines[win_height + 1]:gsub('─', '')))
+      assert.are.equal('Press ? for help', lines[win_height + 2])
+    end)
   end)
 end)

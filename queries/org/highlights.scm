@@ -7,7 +7,12 @@
 ;; why headlines get one heading color regardless of level, and only the
 ;; default TODO/DONE keywords are recognized here (mep.org's structural
 ;; features — cycling, parsing — still respect a custom
-;; `todo_keywords` config; only this static query doesn't).
+;; `todo_keywords` config; only this static query doesn't). Per-keyword
+;; *coloring* driven by the real `todo_keywords`/`todo_keyword_colors`
+;; config lives in mep.org.todohl instead (own extmarks, same reasoning
+;; as mep.org.headlinehl for headline-level colors) — the @keyword/
+;; @comment captures below still apply underneath it as a plain fallback
+;; for the two default keywords when that module is turned off.
 
 (headline stars: (stars) @markup.heading.1) @markup.heading
 
