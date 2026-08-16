@@ -68,6 +68,43 @@ describe('mep.org.polyglot', function()
       assert.are.same({ '', '', '', '', '', '', 'y = 2', '' }, py_lines)
     end)
 
+    it('does not create a shadow buffer for a language whose block the cursor has never visited', function()
+      -- Regression test: setup_buffer's first sync() used to eagerly
+      -- create (and filetype-tag, triggering real vim.lsp.enable
+      -- autostart) a shadow buffer for *every* src-block language the
+      -- instant an org buffer was opened — merely opening a file with,
+      -- say, a `d` example block could silently start a real `serve-d`
+      -- process (if happened to be on PATH) before the cursor had moved
+      -- once. Shadow buffers are real, listed-as-buffers Neovim buffers
+      -- (buftype=''), so "no new buffer got created" is a solid, fully
+      -- black-box way to confirm none of that happened.
+      local before = #vim.api.nvim_list_bufs()
+      local bufnr = buf({ '#+begin_src lua', 'local x = 1', '#+end_src' })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      polyglot.sync(bufnr)
+
+      -- +1 for the org buffer itself; no shadow buffer for `lua` yet.
+      assert.are.equal(before + 1, #vim.api.nvim_list_bufs())
+    end)
+
+    it('context_at_cursor lazily creates a shadow buffer only the first time a block is actually visited', function()
+      local before = #vim.api.nvim_list_bufs()
+      local bufnr = buf({ '#+begin_src lua', 'local x = 1', '#+end_src' })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      assert.are.equal(before + 1, #vim.api.nvim_list_bufs())
+
+      local ctx = polyglot.context_at_cursor(bufnr, 2)
+
+      assert.are.equal(before + 2, #vim.api.nvim_list_bufs()) -- org buffer + the one new shadow
+      assert.are.same({ '', 'local x = 1', '' }, vim.api.nvim_buf_get_lines(ctx.shadow_bufnr, 0, -1, false))
+
+      -- Visiting it again reuses the same shadow buffer rather than
+      -- creating another one.
+      local same_ctx = polyglot.context_at_cursor(bufnr, 2)
+      assert.are.equal(ctx.shadow_bufnr, same_ctx.shadow_bufnr)
+      assert.are.equal(before + 2, #vim.api.nvim_list_bufs())
+    end)
+
     it('re-syncs an existing shadow buffer in place rather than recreating it', function()
       local bufnr = buf({ '#+begin_src lua', 'local x = 1', '#+end_src' })
       polyglot.setup_buffer(bufnr, { keymaps = {} })
@@ -412,6 +449,33 @@ describe('mep.org.polyglot', function()
       -- vim.diagnostic.set above returns.
       local diags = vim.diagnostic.get(bufnr)
       assert.are.equal(0, #diags)
+    end)
+
+    it('does not error when a diagnostic arrives for a shadow buffer after its own org buffer is already gone', function()
+      -- Regression test: the org buffer's own BufDelete/BufWipeout
+      -- teardown is deliberately deferred a tick (vim.schedule — see
+      -- setup_buffer's own comment on why), so `state[bufnr]` can still
+      -- exist for a buffer that's already `nvim_buf_is_valid() == false`.
+      -- A shadow buffer's `DiagnosticChanged` firing in that window
+      -- (e.g. a real language server's publishDiagnostics notification
+      -- landing asynchronously — surfaced in practice via mep.picker's
+      -- preview pane wiring up a real poly-mode session for a buffer
+      -- that then gets wiped the moment a selection is made) used to
+      -- crash with "Invalid buffer id" from an un-guarded
+      -- `vim.diagnostic.set(ns, bufnr, ...)` against the dead buffer.
+      local bufnr = buf({ '#+begin_src lua', 'local x = 1', '#+end_src' })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local shadow = polyglot.context_at_cursor(bufnr, 2).shadow_bufnr
+
+      vim.api.nvim_buf_delete(bufnr, { force = true }) -- teardown_buffer itself hasn't run yet (scheduled)
+      assert.is_false(vim.api.nvim_buf_is_valid(bufnr))
+
+      local ns = vim.api.nvim_create_namespace('test_mep_polyglot_diag_after_delete')
+      assert.has_no.errors(function()
+        vim.diagnostic.set(ns, shadow, {
+          { lnum = 0, col = 0, message = 'late diagnostic', severity = vim.diagnostic.severity.WARN },
+        })
+      end)
     end)
   end)
 

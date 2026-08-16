@@ -1232,6 +1232,75 @@ describe('mep.org.org', function()
     end)
   end)
 
+  describe('activation on a non-modifiable buffer (e.g. a read-only preview pane)', function()
+    -- Regression coverage: mep.picker's own preview pane copies a source
+    -- buffer's lines into a scratch, `modifiable=false` buffer purely for
+    -- syntax coloring, and sets that buffer's filetype to match — for an
+    -- org source file, that used to fire this exact FileType autocmd and
+    -- fully activate poly-mode (real shadow buffers, real attached
+    -- language servers) and every editing keymap on a buffer nobody can
+    -- actually edit and that gets wiped the instant the picker closes or
+    -- the preview selection changes. A still-in-flight diagnostics
+    -- notification landing after that is what actually surfaced as
+    -- "Invalid buffer id" errors right after picking a result in
+    -- `:MepBufferSearch` on an org file.
+    local function make_readonly_org_buf(lines)
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+      vim.bo[buf].modifiable = false
+      vim.api.nvim_set_current_buf(buf)
+      vim.bo[buf].filetype = 'org'
+      return buf
+    end
+
+    it('does not bind any editing keymaps', function()
+      stub_install()
+      org.setup({ fold = false })
+
+      make_readonly_org_buf({ '* Task' })
+
+      local info = vim.fn.maparg('<C-c><C-t>', 'n', false, true) -- cycle_todo
+      assert.are_not.equal(1, info.buffer or 0)
+    end)
+
+    it('does not set up poly-mode (no omnifunc, no shadow buffer for a src block)', function()
+      stub_install()
+      org.setup({ fold = false })
+      local polyglot = require('mep.org.polyglot')
+
+      local buf = make_readonly_org_buf({ '#+begin_src lua', 'local x = 1', '#+end_src' })
+
+      assert.are.equal('', vim.bo[buf].omnifunc)
+      assert.is_nil(polyglot.context_at_cursor(buf, 2))
+    end)
+
+    it('still applies headline color highlighting', function()
+      stub_install()
+      org.setup({ fold = false })
+      local NS = vim.api.nvim_create_namespace('mep_org_headline')
+
+      local buf = make_readonly_org_buf({ '* Task' })
+
+      assert.are.equal(1, #vim.api.nvim_buf_get_extmarks(buf, NS, 0, -1, {}))
+    end)
+
+    it('a normal, modifiable buffer still gets keymaps and poly-mode as before', function()
+      stub_install()
+      org.setup({ fold = false })
+      local polyglot = require('mep.org.polyglot')
+
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '#+begin_src lua', 'local x = 1', '#+end_src' })
+      vim.api.nvim_set_current_buf(buf)
+      vim.bo[buf].filetype = 'org'
+
+      local info = vim.fn.maparg('<C-c><C-t>', 'n', false, true)
+      assert.are.equal(1, info.buffer)
+      assert.are.equal("v:lua.require'mep.org.polyglot'.omnifunc", vim.bo[buf].omnifunc)
+      assert.is_not_nil(polyglot.context_at_cursor(buf, 2))
+    end)
+  end)
+
   describe('Phase 11/12 keymaps', function()
     local orig_input, orig_select
 

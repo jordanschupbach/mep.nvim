@@ -14,6 +14,12 @@ M.defaults = {
     add = { 'a' },
     rename = { 'r' },
     delete = { 'd' },
+    -- Open the node under the cursor with the OS's own default program
+    -- for it (`vim.ui.open` — `xdg-open` on Linux, `open` on macOS,
+    -- `explorer`/`start` on Windows), not Neovim itself. See mep.url's
+    -- own `open`/mep.org.link's own link-following for the same
+    -- mechanism used elsewhere in this project.
+    open_system = { '<C-o>' },
     help = { '?' },
   },
 }

@@ -86,7 +86,7 @@ describe('mep.filetree.filetree', function()
     it('binds the configured keymaps as buffer-local normal-mode mappings', function()
       ft.open({ root = root })
 
-      for _, lhs in ipairs({ '<CR>', 'o', 'l', 'h', 'q', 'R', 'a', 'r', 'd', '?' }) do
+      for _, lhs in ipairs({ '<CR>', 'o', 'l', 'h', 'q', 'R', 'a', 'r', 'd', '?', '<C-o>' }) do
         local info = vim.fn.maparg(lhs, 'n', false, true)
         assert.are.equal(1, info.buffer, 'expected a buffer-local mapping for ' .. lhs)
       end
@@ -171,6 +171,93 @@ describe('mep.filetree.filetree', function()
       vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('q', true, false, true), 'x', false)
       assert.is_false(ft.is_open())
       assert.is_false(vim.api.nvim_win_is_valid(win))
+    end)
+  end)
+
+  describe('open_system', function()
+    local orig_ui_open
+
+    before_each(function()
+      orig_ui_open = vim.ui.open
+    end)
+
+    after_each(function()
+      vim.ui.open = orig_ui_open
+    end)
+
+    local function line_matching(buf, pattern)
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      for i, l in ipairs(lines) do
+        if l:match(pattern) then
+          return i
+        end
+      end
+      error('no line matching ' .. pattern)
+    end
+
+    it('opens the file under the cursor with vim.ui.open', function()
+      ft.open({ root = root })
+      local win = vim.api.nvim_get_current_win()
+      local buf = vim.api.nvim_win_get_buf(win)
+
+      local opened
+      vim.ui.open = function(path)
+        opened = path
+      end
+      vim.api.nvim_win_set_cursor(win, { line_matching(buf, 'a_file%.txt'), 0 })
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-o>', true, false, true), 'x', false)
+
+      assert.are.equal(root .. '/a_file.txt', opened)
+    end)
+
+    it('opens a directory under the cursor too, unlike the normal open keymap', function()
+      ft.open({ root = root })
+      local win = vim.api.nvim_get_current_win()
+      local buf = vim.api.nvim_win_get_buf(win)
+
+      local opened
+      vim.ui.open = function(path)
+        opened = path
+      end
+      vim.api.nvim_win_set_cursor(win, { line_matching(buf, 'a_dir/'), 0 })
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-o>', true, false, true), 'x', false)
+
+      assert.are.equal(root .. '/a_dir', opened)
+    end)
+
+    it('stays inside Neovim, never switching to the target window', function()
+      ft.open({ root = root })
+      local win = vim.api.nvim_get_current_win()
+      local buf = vim.api.nvim_win_get_buf(win)
+
+      vim.ui.open = function() end
+      vim.api.nvim_win_set_cursor(win, { line_matching(buf, 'a_file%.txt'), 0 })
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-o>', true, false, true), 'x', false)
+
+      assert.are.equal(win, vim.api.nvim_get_current_win())
+    end)
+
+    it('warns instead of erroring when vim.ui.open is unavailable', function()
+      ft.open({ root = root })
+      local win = vim.api.nvim_get_current_win()
+      local buf = vim.api.nvim_win_get_buf(win)
+
+      vim.ui.open = nil
+      local warned = false
+      local orig_notify = vim.notify
+      vim.notify = function(_, level)
+        if level == vim.log.levels.WARN then
+          warned = true
+        end
+      end
+      vim.api.nvim_win_set_cursor(win, { line_matching(buf, 'a_file%.txt'), 0 })
+
+      assert.has_no.errors(function()
+        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-o>', true, false, true), 'x', false)
+      end)
+
+      vim.notify = orig_notify
+      assert.is_true(warned)
     end)
   end)
 

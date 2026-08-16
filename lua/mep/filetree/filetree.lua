@@ -86,6 +86,23 @@ local function open_node()
   end
 end
 
+--- Open the node under the cursor with the OS's own default program for
+--- it (`vim.ui.open` — `xdg-open` on Linux, `open` on macOS, `explorer`/
+--- `start` on Windows — same mechanism mep.url/mep.org.link already use
+--- for links), instead of inside Neovim. Works for a directory too
+--- (opens it in the system file manager), unlike `open_node`.
+local function open_system_node()
+  local node = node_at_cursor()
+  if not node then
+    return
+  end
+  if not vim.ui.open then
+    vim.notify('mep.filetree: vim.ui.open unavailable (needs Neovim 0.10+); cannot open ' .. node.path, vim.log.levels.WARN)
+    return
+  end
+  vim.ui.open(node.path)
+end
+
 local function expand_node()
   local node = node_at_cursor()
   if not node or not node.is_dir then
@@ -262,6 +279,7 @@ local function action_list()
   local keymaps = config.options.keymaps
   return {
     { lhs = keymaps.open, fn = open_node, desc = 'Open file / toggle directory' },
+    { lhs = keymaps.open_system, fn = open_system_node, desc = 'Open with the OS default program' },
     { lhs = keymaps.expand, fn = expand_node, desc = 'Expand directory' },
     { lhs = keymaps.collapse, fn = collapse_node, desc = 'Collapse directory / go to parent' },
     { lhs = keymaps.add, fn = add_node, desc = 'Create a new file/directory' },

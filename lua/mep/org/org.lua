@@ -565,14 +565,35 @@ end
 local function activate_org_buffer(bufnr, options)
   apply_highlight(bufnr, options)
   apply_fold(bufnr, options)
-  bind_keymaps(bufnr, options)
   apply_tags_align_on_save(bufnr, options)
   apply_conceal(bufnr, options)
   apply_block_highlight(bufnr, options)
   apply_results_highlight(bufnr, options)
   apply_headline_highlight(bufnr, options)
   apply_todo_highlight(bufnr, options)
-  apply_polyglot(bufnr, options)
+  -- Editing keymaps and poly-mode LSP (real shadow buffers, real
+  -- language-server attach, real scaffold files on disk — see
+  -- mep.org.polyglot's own header comment) only make sense for a buffer
+  -- the user can actually edit. A non-modifiable buffer with filetype
+  -- 'org' is never that: it's some other library's read-only preview
+  -- (confirmed the hard way against mep.picker's own preview pane —
+  -- `preview.lua` copies a source buffer's lines into a scratch,
+  -- `modifiable=false` buffer and sets its filetype to match, purely for
+  -- syntax coloring; every re-render re-fires this same FileType
+  -- autocmd, so without this guard each keystroke while previewing an
+  -- org file spun up a *fresh* poly-mode LSP session — real shadow
+  -- buffers and, for any src-block language with a curated `mep.lsp`
+  -- server on PATH, a real attached client — for a buffer that gets
+  -- wiped the moment the picker closes or the selection changes. Torn
+  -- down shadow buffers can still have an in-flight diagnostics
+  -- notification arrive after that, which is what actually surfaced as
+  -- "Invalid buffer id" errors right after picking a result). Every
+  -- *coloring*-only activation above stays on regardless — highlighting
+  -- a read-only preview accurately is exactly the point.
+  if vim.bo[bufnr].modifiable then
+    bind_keymaps(bufnr, options)
+    apply_polyglot(bufnr, options)
+  end
 end
 
 --- Configure mep.org. See mep.org.config.defaults for

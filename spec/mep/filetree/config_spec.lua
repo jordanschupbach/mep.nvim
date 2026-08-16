@@ -20,6 +20,7 @@ describe('mep.filetree.config', function()
     assert.are.same({ 'r' }, config.defaults.keymaps.rename)
     assert.are.same({ 'd' }, config.defaults.keymaps.delete)
     assert.are.same({ '?' }, config.defaults.keymaps.help)
+    assert.are.same({ '<C-o>' }, config.defaults.keymaps.open_system)
   end)
 
   it('setup({}) returns a copy of the defaults', function()

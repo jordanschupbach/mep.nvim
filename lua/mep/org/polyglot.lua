@@ -7,7 +7,7 @@
 --- whenever org highlighting itself is, no wiring here).
 ---
 --- The trick (the same one otter.nvim popularized, reimplemented here
---- with zero dependencies): for every language a buffer's src blocks use,
+--- with zero dependencies): for each language a buffer's src blocks use,
 --- keep one hidden real Neovim buffer (a "shadow buffer") in sync with
 --- that language's block bodies, laid out at *the same line numbers* as
 --- the org buffer — every line outside a block of that language is left
@@ -29,6 +29,19 @@
 --- Neovim's own buffer-change tracking then keeps that client's view of
 --- the shadow buffer's text current automatically, the same as any real
 --- edited buffer, whenever `sync` rewrites its lines.
+---
+--- A given language's shadow buffer is only ever created the first time
+--- the cursor actually lands inside one of its blocks (`context_at_cursor`
+--- creates it lazily on demand) — *not* proactively for every language
+--- `sync` sees in the buffer. Since creating one is exactly what triggers
+--- real-server autostart above, eager creation would silently start (and
+--- let attach) a real language server for every src-block language the
+--- instant an org buffer is opened, whether or not the user ever visits
+--- that block — confirmed the hard way: a demo org file with a `d`
+--- example block, opened on a machine that happens to have `serve-d` on
+--- `PATH`, silently started it and popped up its own "DCD is out of
+--- date, download it?" prompt before the cursor had moved once. `sync`
+--- itself only ever *refreshes* shadow buffers that already exist.
 ---
 --- A shadow buffer's own content is otherwise never written to real
 --- disk (see `get_or_create_shadow`'s own comment for how that's
@@ -320,19 +333,18 @@ local function get_or_create_shadow(org_bufnr, raw_lang)
   return shadow
 end
 
---- Recomputes every shadow buffer for `bufnr` from its current src
---- blocks: creates one for any newly-seen language, and rewrites the
---- content of every shadow buffer already tracked (including one whose
---- language no longer appears in the buffer — left all-blank rather than
---- deleted, so a language removed and then re-added in the same editing
---- session doesn't repeatedly tear down and reattach a client).
+--- Rewrites the content of every shadow buffer already tracked for
+--- `bufnr` (including one whose language no longer appears in the buffer
+--- — left all-blank rather than deleted, so a language removed and then
+--- re-added in the same editing session doesn't repeatedly tear down and
+--- reattach a client) from its current src blocks. Deliberately never
+--- creates a *new* shadow buffer for a language sync sees but hasn't
+--- tracked yet — see this module's own header comment for why that's
+--- `context_at_cursor`'s job, lazily, instead.
 function M.sync(bufnr)
   local st = state[bufnr]
   if not st then
     return
-  end
-  for _, block in ipairs(babel.find_blocks(bufnr)) do
-    get_or_create_shadow(bufnr, block.lang)
   end
   for ft, shadow in pairs(st.shadow) do
     if vim.api.nvim_buf_is_valid(shadow) then
@@ -368,8 +380,12 @@ end
 --- `{ shadow_bufnr, ft, block }` for the src block containing `lnum` in
 --- `bufnr`, or nil if `lnum` isn't strictly inside one (on the
 --- `#+begin_src`/`#+end_src` delimiter line itself doesn't count — those
---- lines are blank in every shadow buffer) or that block's language has
---- no tracked shadow buffer yet.
+--- lines are blank in every shadow buffer) or the language has no
+--- Neovim filetype mapping (mep.org.lang.to_filetype). Lazily creates
+--- (and immediately populates) that block's language's shadow buffer the
+--- first time it's asked about — see this module's own header comment
+--- for why that's deliberately not done any earlier/more eagerly than
+--- this.
 function M.context_at_cursor(bufnr, lnum)
   local block = babel.at_cursor(bufnr, lnum)
   if not block or lnum <= block.start_lnum or lnum >= block.end_lnum then
@@ -380,9 +396,16 @@ function M.context_at_cursor(bufnr, lnum)
     return nil
   end
   local ft = lang.to_filetype(block.lang)
-  local shadow = ft and st.shadow[ft]
-  if not shadow or not vim.api.nvim_buf_is_valid(shadow) then
+  if not ft then
     return nil
+  end
+  local shadow = st.shadow[ft]
+  if not shadow or not vim.api.nvim_buf_is_valid(shadow) then
+    shadow = get_or_create_shadow(bufnr, block.lang)
+    if not shadow then
+      return nil
+    end
+    M.sync(bufnr)
   end
   return { shadow_bufnr = shadow, ft = ft, block = block }
 end
@@ -572,7 +595,14 @@ end
 
 function refresh_diagnostics(bufnr)
   local st = state[bufnr]
-  if not st then
+  -- `bufnr` can still have tracked state but no longer be a real buffer:
+  -- this runs off a shadow buffer's own `DiagnosticChanged` (e.g. a
+  -- server's publishDiagnostics notification arriving asynchronously,
+  -- on its own schedule), which can land after `bufnr` itself is
+  -- deleted but before its own deferred `teardown_buffer` (BufDelete/
+  -- BufWipeout schedule a tick out — see setup_buffer's own comment on
+  -- why) has actually run and cleared `state[bufnr]`.
+  if not st or not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
   local ranges_by_ft = {}

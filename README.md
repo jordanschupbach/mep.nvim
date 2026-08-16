@@ -198,6 +198,7 @@ project doesn't walk the whole filesystem up front.
 | Key            | Action                                                        |
 |-----------------|----------------------------------------------------------------|
 | `<CR>` / `o`    | Open file under cursor (in the window the tree was opened from), or toggle a directory |
+| `<C-o>`         | Open the file/directory under cursor with the OS's own default program (`vim.ui.open` — `xdg-open` on Linux, `open` on macOS), not Neovim |
 | `l` / `<Right>` | Expand directory under cursor                                  |
 | `h` / `<Left>`  | Collapse an expanded directory, or jump to its parent            |
 | `q` / `<Esc>`   | Close the tree                                                  |
@@ -211,7 +212,7 @@ A horizontal rule and a "Press ? for help" hint sit below the tree
 itself, at the bottom of the panel.
 
 All configurable via `require('mep.filetree').setup({...})` —
-`width`, `root`, `show_hidden`, and `keymaps.open`/`expand`/`collapse`/`close`/`refresh`/`add`/`rename`/`delete`/`help`
+`width`, `root`, `show_hidden`, and `keymaps.open`/`open_system`/`expand`/`collapse`/`close`/`refresh`/`add`/`rename`/`delete`/`help`
 (each a list of lhs strings). See `lua/mep/filetree/config.lua` for the
 full defaults.
 
@@ -796,7 +797,18 @@ structure editing below works immediately, even before (or without) the
     itself, and (like `mep.lsp` itself) never installs one either: a
     language with no server actually on `PATH` just gets no LSP features
     inside its blocks, the same silent-until-you-install-it contract
-    `mep.lsp`'s own README section describes. On a system with nothing
+    `mep.lsp`'s own README section describes. A language's shadow buffer
+    (and therefore its real server, if one's registered) is only ever
+    created the first time the cursor actually lands inside one of its
+    blocks — never proactively for every language a buffer's blocks use
+    the moment it's opened, since setting a shadow buffer's `filetype` is
+    exactly what triggers that autostart: eager creation would silently
+    start a real server for every src-block language in the buffer
+    whether or not you ever visit it (worse than merely wasteful for a
+    server with side effects of its own — `serve-d`'s bundled DCD
+    prompting to download an update the moment its shadow buffer's
+    filetype was set, before the cursor had moved once, is what surfaced
+    this in the first place). On a system with nothing
     globally on `PATH` by default (NixOS being the standing example — see
     this repo's own `flake.nix` `devShells.default`, which lists a server
     for every `mep.lsp.servers` entry precisely so `nix develop` gives you
