@@ -13,6 +13,8 @@ describe('mep.snippet.config', function()
 
   it('has sensible defaults', function()
     assert.is_true(config.defaults.tab_keymap)
+    assert.is_true(config.defaults.builtin_langs)
+    assert.are.same({ '<leader>yy' }, config.defaults.keymaps.picker)
   end)
 
   it('setup({}) returns a copy of the defaults', function()

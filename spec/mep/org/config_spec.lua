@@ -51,6 +51,7 @@ describe('mep.org.config', function()
     assert.are.same({}, config.defaults.keymaps.toggle_checkbox)
     assert.is_true(config.defaults.src_block_highlight)
     assert.is_true(config.defaults.results_block_highlight)
+    assert.is_true(config.defaults.babel_status_highlight)
     assert.is_true(config.defaults.headline_highlight)
   end)
 

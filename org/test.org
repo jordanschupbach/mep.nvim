@@ -5,12 +5,12 @@
 #include <iostream>
 
 int main() {
-    std::cout << "Hellozz, world";
+    std::cout << "Hello, world";
     return 0;
 }
 #+END_SRC
 #+RESULTS:
-: Hellozz, world
+: Hello, world
 
 * C Main File Example
 
@@ -19,67 +19,67 @@ int main() {
 #include <stdio.h>
 
 int main() {
-    printf("Hellozz, world");
+    printf("Hello, world");
     return 0;
 }
 #+END_SRC
 #+RESULTS:
-: Hellozz, world
+: Hello, world
 
 
 * C Script Example
 
 #+name: Hello, world in C (no main)
 #+BEGIN_SRC C :main yes :results output :includes <stdio.h>
-printf("Hellozz, world");
+printf("Hello, world");
 #+END_SRC
 #+RESULTS:
-: Hellozz, world
+: Hello, world
 
 * Ruby Example
 
 #+name: Hello, world in Ruby
 #+BEGIN_SRC ruby :results output
-puts("Hellozzz, world")
+puts("Hello, world")
 #+END_SRC
 #+RESULTS:
-: Hellozzz, world
+: Hello, world
 
 * Perl Example
 
 #+name: Hello, world in Perl
 #+BEGIN_SRC perl :results output
-print("Hellozz, world");
+print("Hello, world");
 #+END_SRC
 #+RESULTS:
-: Hellozz, world
+: Hello, world
 
 * R Example
 
 #+name: Hello, world in R
 #+BEGIN_SRC R :results output
-print("Hellozzz, world")
+print("Hello, world")
 #+END_SRC
 #+RESULTS:
-: [1] "Hellozzz, world"
+: [1] "Hello, world"
 
 * PHP Example
 
 #+name: Hello, world in PHP
 #+BEGIN_SRC php :results output
-echo "Hellozzz, world";
+echo "Hello, world";
 #+END_SRC
 #+RESULTS:
-: Hellozzz, world
+: Hello, world
 
 * Rust Example
 
 #+name: Hello, world in Rust
 #+BEGIN_SRC rust :main yes :results output
-println!("Hellozzz, world");
+println!("Hello, world");
 #+END_SRC
 #+RESULTS:
-: Hellozzz, world
+: Hello, world
 
 * Go Example
 
@@ -90,113 +90,113 @@ package main
 import "fmt"
 
 func main() {
-    fmt.Println("Hellozzz, World!");
+    fmt.Println("Hello, World!");
 }
 #+END_SRC
 #+RESULTS:
-: Hellozzz, World!
+: Hello, World!
 
 * TypeScript Example
 
 #+name: Hello, world in TypeScript
 #+BEGIN_SRC typescript :results output
-const message: string = "Hellozzzz, world";
+const message: string = "Hello, world";
 console.log(message);
 #+END_SRC
 #+RESULTS:
-: Hellozzzz, world
+: Hello, world
 
 * Elixir Example
 
 #+name: Hello, world in Elixir
 #+BEGIN_SRC elixir :results output
-IO.puts("Hellozzz, world")
+IO.puts("Hello, world")
 #+END_SRC
 #+RESULTS:
-: Hellozzz, world
+: Hello, world
 
 * Julia Example
 
 #+name: Hello, world in Julia
 #+BEGIN_SRC julia :results output
-println("Hellozzz, world")
+println("Hello, world")
 #+END_SRC
 #+RESULTS:
-: Hellozzz, world
+: Hello, world
 
 * Clojure Example
 
 #+name: Hello, world in Clojure
 #+BEGIN_SRC clojure :results output
-(println "Hellozzzz, world")
+(println "Hello, world")
 #+END_SRC
 #+RESULTS:
-: Hellozzzz, world
+: Hello, world
 
 * C# Example
 
 #+name: Hello, world in C#
 #+BEGIN_SRC csharp :results output
-Console.WriteLine("Hellozzzz, world");
+Console.WriteLine("Hello, world");
 #+END_SRC
 #+RESULTS:
-: Hellozzzz, world
+: Hello, world
 
 * Fortran Example
 
 #+name: Hello, world in Fortran
 #+BEGIN_SRC fortran :results output
 program hello
-  print *, "Hellozzz, world"
+  print *, "Hello, world"
 end program hello
 #+END_SRC
 #+RESULTS:
-:  Hellozzz, world
+:  Hello, world
 
 * Scala Example
 
 #+name: Hello, world in Scala
 #+BEGIN_SRC scala :main yes :results output
-println("Hellozz, world")
+println("Hello, world")
 #+END_SRC
 #+RESULTS:
-: Hellozz, world
+: Hello, world
 
 * Python Example
 
 #+name: Hello, world in Python
 #+BEGIN_SRC python :results output
-print("Hellozzz, world")
+print("Hello, world")
 #+END_SRC
 #+RESULTS:
-: Hellozzz, world
+: Hello, world
 
 * Zig Example
 
 #+name: Hello, world in Zig
 #+BEGIN_SRC zig :main yes :results output
-try stdout.writeAll("Hellozzz, world\n");
+try stdout.writeAll("Hello, world\n");
 #+END_SRC
 #+RESULTS:
-: Hellozzz, world
+: Hello, world
 
 * Nim Example
 
 #+name: Hello, world in Nim
 #+BEGIN_SRC nim :results output
-echo "Hellozzz, world"
+echo "Hello, world"
 #+END_SRC
 #+RESULTS:
-: Hellozzz, world
+: Hello, world
 
 * Crystal Example
 
 #+name: Hello, world in Crystal
 #+BEGIN_SRC crystal :results output
-puts "Hellozzz, world"
+puts "Hello, world"
 #+END_SRC
 #+RESULTS:
-: Hellozzz, world
+: Hello, world
 
 * Java Example
 
@@ -205,40 +205,40 @@ puts "Hellozzz, world"
 // System.out.println("Hello, world");
 public class HelloWorld {
     public static void main(String[] args) {
-        System.out.println("Hellozzz, World!");
+        System.out.println("Hello, World!");
     }
 }
 #+END_SRC
 #+RESULTS:
-: Hellozzz, World!
+: Hello, World!
 
 * Kotlin Example
 
 #+name: Hello, world in Kotlin
 #+BEGIN_SRC kotlin :results output
-println("Hellozzz, world")
+println("Hello, world")
 #+END_SRC
 #+RESULTS:
-: Hellozzz, world
+: Hello, world
 
 * Haskell Example
 
 #+name: Hello, world in Haskell
 #+BEGIN_SRC haskell :results output
 main :: IO ()
-main = putStrLn "Hellozzz, World!"
+main = putStrLn "Hello, World!"
 #+END_SRC
 #+RESULTS:
-: Hellozzz, World!
+: Hello, World!
 
 * OCaml Example
 
 #+name: Hello, world in OCaml
 #+BEGIN_SRC ocaml :results output
-print_string "Hellozzz, world\n";;
+print_string "Hello, world\n";;
 #+END_SRC
 #+RESULTS:
-: Hellozzz, world
+: Hello, world
 
 * D Example
 
@@ -247,8 +247,8 @@ print_string "Hellozzz, world\n";;
 import std.stdio;
 
 void main() {
-    writeln("Hellozzz, World!");
+    writeln("Hello, World!");
 }
 #+END_SRC
 #+RESULTS:
-: Hellozzz, World!
+: Hello, World!

@@ -47,6 +47,7 @@ local babel = require('mep.org.babel')
 local block_mod = require('mep.org.block')
 local blockhl = require('mep.org.blockhl')
 local resultshl = require('mep.org.resultshl')
+local babelhl = require('mep.org.babelhl')
 local headlinehl = require('mep.org.headlinehl')
 local todohl = require('mep.org.todohl')
 local footnote_mod = require('mep.org.footnote')
@@ -88,6 +89,7 @@ M.babel = babel
 M.block = block_mod
 M.blockhl = blockhl
 M.resultshl = resultshl
+M.babelhl = babelhl
 M.headlinehl = headlinehl
 M.todohl = todohl
 M.footnote = footnote_mod
@@ -447,6 +449,21 @@ local function apply_results_highlight(bufnr, options)
   })
 end
 
+local function apply_babel_status_highlight(bufnr, options)
+  if not options.babel_status_highlight then
+    return
+  end
+  babelhl.define_default_hl()
+  babelhl.apply(bufnr)
+  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'InsertLeave', 'LspAttach', 'LspDetach' }, {
+    group = augroup,
+    buffer = bufnr,
+    callback = function()
+      babelhl.apply(bufnr)
+    end,
+  })
+end
+
 local function apply_headline_highlight(bufnr, options)
   if not options.headline_highlight then
     return
@@ -569,6 +586,7 @@ local function activate_org_buffer(bufnr, options)
   apply_conceal(bufnr, options)
   apply_block_highlight(bufnr, options)
   apply_results_highlight(bufnr, options)
+  apply_babel_status_highlight(bufnr, options)
   apply_headline_highlight(bufnr, options)
   apply_todo_highlight(bufnr, options)
   -- Editing keymaps and poly-mode LSP (real shadow buffers, real

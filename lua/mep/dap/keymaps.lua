@@ -27,7 +27,7 @@ function M.bind(keymaps)
   map(keymaps.step_out, session.step_out, 'mep.dap: step out')
   map(keymaps.launch, session.launch_interactive, 'mep.dap: launch')
   map(keymaps.terminate, session.terminate, 'mep.dap: terminate')
-  map(keymaps.toggle_sidebar, sidebar.toggle, 'mep.dap: toggle sidebar')
+  map(keymaps.toggle_sidebar, sidebar.toggle_layout, 'mep.dap: toggle debug layout (sidebar + console)')
   map(keymaps.toggle_repl, repl.toggle, 'mep.dap: toggle debug console')
   map(keymaps.evaluate, repl.evaluate_interactive, 'mep.dap: evaluate expression')
 end

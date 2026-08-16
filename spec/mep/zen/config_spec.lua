@@ -20,6 +20,7 @@ describe('mep.zen.config', function()
       gutter = true,
       chrome = true,
     }, config.defaults.hide)
+    assert.are.same({ '<leader>zz' }, config.defaults.keymaps.toggle)
   end)
 
   it('setup({}) returns a copy of the defaults', function()

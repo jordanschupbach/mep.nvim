@@ -324,6 +324,10 @@ function M.open(lines, sources, opts)
   end
 
   local map_opts = { buffer = buf, nowait = true, silent = true }
+  local function opts_with(desc)
+    return vim.tbl_extend('force', map_opts, { desc = desc })
+  end
+
   vim.keymap.set('n', '<CR>', function()
     local src = current_source()
     if not src then
@@ -335,7 +339,7 @@ function M.open(lines, sources, opts)
     end
     vim.api.nvim_win_set_buf(0, src.bufnr)
     vim.api.nvim_win_set_cursor(0, { src.lnum, 0 })
-  end, map_opts)
+  end, opts_with('mep.org.agenda: jump to item'))
 
   vim.keymap.set('n', 't', function()
     local src = current_source()
@@ -344,7 +348,7 @@ function M.open(lines, sources, opts)
     end
     todo_mod.cycle(src.bufnr, src.lnum, opts.todo_keywords)
     redraw()
-  end, map_opts)
+  end, opts_with('mep.org.agenda: cycle TODO state'))
 
   vim.keymap.set('n', 's', function()
     local src = current_source()
@@ -352,14 +356,14 @@ function M.open(lines, sources, opts)
       return
     end
     plan_mod.schedule_interactive(src.bufnr, win, src.lnum)
-  end, map_opts)
+  end, opts_with('mep.org.agenda: schedule item'))
 
   vim.keymap.set('n', 'q', function()
     pcall(vim.api.nvim_win_close, win, true)
     if vim.api.nvim_win_is_valid(prev_win) then
       vim.api.nvim_set_current_win(prev_win)
     end
-  end, map_opts)
+  end, opts_with('mep.org.agenda: close'))
 
   return buf, win
 end

@@ -63,8 +63,27 @@
 ---
 --- Explicitly deferred, likely indefinitely (see ORGMODE_ROADMAP.md):
 --- persistent per-block sessions, and the rest of real org-babel's large
---- header-argument surface (`:session`, `:noweb`, `:cache`, etc.) beyond
---- `:results`, `:var`, and (C/C++ only) `:includes`.
+--- header-argument surface (`:session`, `:noweb`, etc.) beyond
+--- `:results`, `:var`, `:cache`, and (C/C++ only) `:includes`.
+---
+--- `:cache yes` (opt-in — a plain `#+begin_src` block with no `:cache`
+--- always re-executes, matching real org-babel's own default): `M.
+--- execute` keys `M.results_cache` by `bufnr`, the block's own
+--- `start_lnum`, and a `vim.fn.sha256` hash of its body + header-args
+--- text, and skips `core.job.spawn` entirely on a hit, reusing the
+--- cached stdout. In-memory only (lost on Neovim restart, and not
+--- shared across separate Neovim instances editing the same file) —
+--- deliberately not persisted to disk, which would add file-format/
+--- path/invalidation-on-external-edit design surface disproportionate
+--- to what this was asked for. Only a *successful* run (exit code 0)
+--- is cached, so a known-bad result never masquerades as the cached
+--- answer. This is a body-hash-only cache key: a block that reads
+--- external state (a file, the network, wall-clock time) can return a
+--- stale cached result for unchanged *block text* even though the
+--- real answer changed — a known, inherent limitation of this
+--- approach, not something `:cache yes` tries to detect or warn about.
+--- `mep.org.babelhl` renders whether a block's last run was served
+--- from cache (and its LSP status) as an end-of-block annotation.
 ---
 --- Which languages get added here at all: a real LSP server *and* a
 --- real tree-sitter grammar both need to exist for it first (`mep.lsp.
@@ -75,6 +94,21 @@
 local core = require('mep.core')
 
 local M = {}
+
+--- `:cache yes` result storage: `key` (`M.cache_key`) -> `stdout` (the
+--- list of output lines from that key's last successful run). See this
+--- module's own header comment for the caching feature's full scope
+--- and limitations.
+M.results_cache = {}
+
+--- The `M.results_cache` key for a block: its buffer, its own
+--- `start_lnum` (distinguishes two blocks with identical bodies at
+--- different locations), and a hash of its body + header-args text
+--- (so editing either invalidates the cache for that block).
+function M.cache_key(bufnr, block)
+  local hash = vim.fn.sha256(table.concat(block.body, '\n') .. '\0' .. (block.args or ''))
+  return bufnr .. ':' .. block.start_lnum .. ':' .. hash
+end
 
 --- Shared by every compiled language's `wrap_main`: prepend each
 --- `includes` token as its own `#include` line, then wrap `body_lines`
@@ -1135,6 +1169,19 @@ function M.execute(bufnr, lnum, on_done)
   end
 
   local args = M.parse_header_args(block.args)
+
+  if args.cache == 'yes' then
+    local cache_key = M.cache_key(bufnr, block)
+    local cached = M.results_cache[cache_key]
+    if cached then
+      M.insert_or_update_results(bufnr, block.end_lnum, cached)
+      if on_done then
+        on_done(0, cached, {})
+      end
+      return
+    end
+  end
+
   local results_mode = (args.results and args.results:match('value')) and 'value' or 'output'
   local prelude = {}
   for _, assignment in ipairs(args.var) do
@@ -1163,6 +1210,8 @@ function M.execute(bufnr, lnum, on_done)
         'mep.org: babel ' .. failure_verb .. ' failed (' .. block.lang .. '): ' .. (first_error_line(stderr) or ('exit code ' .. code)),
         vim.log.levels.WARN
       )
+    elseif args.cache == 'yes' then
+      M.results_cache[M.cache_key(bufnr, block)] = stdout
     end
     M.insert_or_update_results(bufnr, block.end_lnum, stdout)
     if on_done then

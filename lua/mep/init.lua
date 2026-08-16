@@ -3,11 +3,12 @@
 --- each library (`mep.core`, `mep.sanity`, `mep.dashboard`, `mep.icons`,
 --- `mep.filetree`, `mep.treesitter`, `mep.org`, `mep.markdown`, `mep.picker`,
 --- `mep.whichkey`, `mep.sidebar`, `mep.notify`, `mep.activitybar`,
---- `mep.lsp`, `mep.completion`, `mep.url`, `mep.git`, `mep.window`,
+--- `mep.lsp`, `mep.diagnostics`, `mep.completion`, `mep.url`, `mep.git`, `mep.window`,
 --- `mep.theme`, `mep.chrome`, `mep.project`, `mep.ai`, `mep.scratch`,
 --- `mep.symbols`, `mep.hints`, `mep.dap`, `mep.docs`, `mep.flashcards`,
 --- `mep.help`, `mep.colorizer`, `mep.leetcode`, `mep.roam`, `mep.run`,
---- `mep.repl`, `mep.snippet`, `mep.todoscan`, `mep.zen`);
+--- `mep.repl`, `mep.snippet`, `mep.todoscan`, `mep.zen`, `mep.clipboard`,
+--- `mep.bib`);
 --- libraries can equally be required and configured directly, e.g.
 --- `require('mep.picker').setup({ ... })`.
 local M = {}
@@ -105,7 +106,18 @@ local M = {}
 -- nothing at all until `toggle()`/`enable()` is actually called (each
 -- of `mep.activitybar`/`mep.filetree`/`mep.symbols`/`mep.chrome` is
 -- `require`d lazily then, softly — not depended on at `setup()` time),
--- so it's simply added at the end too. `theme` is listed right
+-- so it's simply added at the end too. `clipboard` has no ordering
+-- dependency either — its own `setup()` only ever sets `'clipboard'`/
+-- `vim.g.clipboard`, both plain option/global writes with no
+-- dependency on any other library's setup having run first, so it's
+-- simply added at the end too. `bib` has no ordering dependency either
+-- — it reads `.bib` files and binds its own keymap only at `setup()`/
+-- picker-open time, no dependency on any other library's setup having
+-- run first (its `<localleader>ir` default only resolves usefully once
+-- `vim.g.maplocalleader` is set, but that's a user prerequisite, not
+-- an ordering dependency on another library in this list — see `mep.
+-- bib.bib`'s own header comment), so it's simply added at the end too.
+-- `theme` is listed right
 -- after `sanity`,
 -- deliberately, for two reasons that both point the same direction:
 -- its own setup() (which applies a colorscheme by default,
@@ -133,6 +145,14 @@ local CONFIGURABLE_LIBRARIES = {
   'notify',
   'activitybar',
   'lsp',
+  -- Listed right after `lsp`, deliberately (a real ordering
+  -- dependency, unlike most of this list): `mep.diagnostics.setup()`
+  -- forces `vim.diagnostic.config({ virtual_text = false })` so its own
+  -- circles fully replace native virtual text — `mep.lsp.setup()` also
+  -- calls `vim.diagnostic.config(options.diagnostics)` (its own
+  -- `virtual_text = true` default), so `diagnostics` has to run after
+  -- `lsp` for its override to be the one that sticks.
+  'diagnostics',
   'completion',
   'url',
   'git',
@@ -155,6 +175,8 @@ local CONFIGURABLE_LIBRARIES = {
   'snippet',
   'todoscan',
   'zen',
+  'clipboard',
+  'bib',
 }
 
 --- opts: `{ theme = {...}, sanity = {...}, dashboard = {...}, icons =
@@ -162,12 +184,12 @@ local CONFIGURABLE_LIBRARIES = {
 --- {...}, picker =
 --- {...}, whichkey = {...}, sidebar = {...}, notify = {...}, activitybar
 --- = {...}, lsp =
---- {...}, completion = {...}, url = {...}, git = {...}, window = {...},
+--- {...}, diagnostics = {...}, completion = {...}, url = {...}, git = {...}, window = {...},
 --- chrome = {...}, project = {...}, ai = {...}, scratch = {...}, symbols
 --- = {...}, hints = {...}, dap = {...}, docs = {...}, flashcards =
 --- {...}, help = {...}, colorizer = {...}, leetcode = {...}, roam =
 --- {...}, run = {...}, repl = {...}, snippet = {...}, todoscan = {...},
---- zen = {...} }` (all optional). Each sub-table is
+--- zen = {...}, clipboard = {...}, bib = {...} }` (all optional). Each sub-table is
 --- forwarded to that library's own `setup()`; see `mep.<name>.config.
 --- defaults` for each library's shape. Note: mep.treesitter's default
 --- `ensure_installed = true` means this can kick off background
@@ -211,6 +233,7 @@ local LAZY_LIBRARIES = {
   notify = true,
   activitybar = true,
   lsp = true,
+  diagnostics = true,
   completion = true,
   url = true,
   git = true,
@@ -233,6 +256,8 @@ local LAZY_LIBRARIES = {
   snippet = true,
   todoscan = true,
   zen = true,
+  clipboard = true,
+  bib = true,
   version = true,
 }
 

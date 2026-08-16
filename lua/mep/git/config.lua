@@ -17,11 +17,11 @@ M.defaults = {
   -- kind. `text` is truncated to `signcolumn`'s own 2-cell width by
   -- Neovim itself if longer.
   signs = {
-    add = { text = '+', hl = 'MepGitAdd' },
-    change = { text = '~', hl = 'MepGitChange' },
-    delete = { text = '_', hl = 'MepGitDelete' },
-    topdelete = { text = '‾', hl = 'MepGitDelete' },
-    changedelete = { text = '~', hl = 'MepGitChangeDelete' },
+    add = { text = '|', hl = 'MepGitAdd' },
+    change = { text = '|', hl = 'MepGitChange' },
+    delete = { text = '|', hl = 'MepGitDelete' },
+    topdelete = { text = '|', hl = 'MepGitDelete' },
+    changedelete = { text = '|', hl = 'MepGitChangeDelete' },
   },
   keymaps = {
     -- Buffer-local, bound wherever the gutter is attached.

@@ -161,10 +161,15 @@ function M.toggle()
   end
 end
 
---- Configure mep.zen: `width`, `hide` (see mep.zen.config.defaults).
---- Works with sensible defaults even if this is never called.
+--- Configure mep.zen: `width`, `hide`, `keymaps` (see mep.zen.config.
+--- defaults). Works with sensible defaults even if this is never
+--- called.
 function M.setup(opts)
-  return config.setup(opts)
+  local options = config.setup(opts)
+  for _, lhs in ipairs(options.keymaps.toggle) do
+    vim.keymap.set('n', lhs, M.toggle, { desc = 'mep.zen: toggle zen mode' })
+  end
+  return options
 end
 
 --- Test/dev-only: forget any active zen session without restoring

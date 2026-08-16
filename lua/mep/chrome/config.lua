@@ -44,6 +44,38 @@ local function tab_close_widget()
   }
 end
 
+--- The default `tabline` `widgets_buttons`: right-aligned toggle
+--- buttons for tests/notifications/git/filetree/symbols, one per
+--- `mep.activitybar` flyout panel plus `mep.filetree`/`mep.symbols`'
+--- own toggles. Each is a soft, optional dependency (`pcall`'d
+--- `require`, resolved lazily at click time, not at config-definition
+--- time) — clicking one without that library loaded/configured is a
+--- harmless no-op, the same "everything independently optional"
+--- convention `mep.zen` uses for its own soft deps.
+local function toggle_button(icon_name, require_path)
+  return {
+    text = function()
+      return ' ' .. (require('mep.icons').get_ui_icon(icon_name) or icon_name) .. ' '
+    end,
+    on_click = function()
+      local ok, mod = pcall(require, require_path)
+      if ok and mod.toggle then
+        mod.toggle()
+      end
+    end,
+  }
+end
+
+local function tabline_buttons()
+  return {
+    toggle_button('tests', 'mep.activitybar.tests'),
+    toggle_button('notifications', 'mep.activitybar.notifications'),
+    toggle_button('git', 'mep.activitybar.git'),
+    toggle_button('filetree', 'mep.filetree'),
+    toggle_button('symbols', 'mep.symbols'),
+  }
+end
+
 M.defaults = {
   -- Each of winbar/statuscolumn is independently opt-in (`enable =
   -- false` by default — this project's own default editor chrome stays
@@ -71,9 +103,11 @@ M.defaults = {
   tabline = {
     enable = true,
     -- Extra widgets rendered before/after the (always-on) circle tab
-    -- list.
+    -- list, plus a right-aligned row of panel-toggle buttons (`%=`
+    -- pushes them flush against the tabline's right edge).
     widgets_before = { mode_widget() },
     widgets_after = { tab_add_widget(), tab_close_widget() },
+    widgets_buttons = tabline_buttons(),
   },
   statuscolumn = {
     enable = false,

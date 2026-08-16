@@ -7,6 +7,15 @@ M.defaults = {
   -- TODO this library implements explicitly asks for "navigated via
   -- <Tab>/<S-Tab>").
   tab_keymap = true,
+  -- Whether `mep.snippet.langs.*`'s curated per-language snippet sets
+  -- (Lua/Python/Go/Rust/C/JS/TS/shell) are registered at `setup()` time.
+  -- `false` starts with an empty registry — supply entirely your own via
+  -- `mep.snippet.add(filetype, {...})` instead.
+  builtin_langs = true,
+  keymaps = {
+    -- Global: browse/insert a snippet for the current buffer's filetype.
+    picker = { '<leader>yy' },
+  },
 }
 
 local keys = require('mep.core.keys')

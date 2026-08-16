@@ -4,11 +4,14 @@
 --- here the way there is for a status list) showing the current call
 --- stack, the top frame's scopes/variables, and every recorded
 --- breakpoint. Redraws itself on `mep.dap.session.subscribe` events and
---- `mep.dap.breakpoints.on_change`.
+--- `mep.dap.breakpoints.on_change`. `M.toggle_layout` pairs this panel
+--- (left, by default) with `mep.dap.repl`'s own bottom-split debug
+--- console, so one keymap opens/closes the whole dap-ui-like layout.
 local sidebar_mod = require('mep.sidebar')
 local config = require('mep.dap.config')
 local session = require('mep.dap.session')
 local breakpoints = require('mep.dap.breakpoints')
+local repl = require('mep.dap.repl')
 
 local M = {}
 
@@ -164,6 +167,21 @@ end
 
 function M.is_open()
   return instance ~= nil and instance:is_open()
+end
+
+--- The dap-ui-like combined layout toggle: this panel (left) and `mep.
+--- dap.repl`'s debug console (bottom split) open/close together —
+--- idempotent regardless of which combination is currently open, since
+--- either one being open already means "the layout is up", so a press
+--- closes both rather than only bringing the other one in sync.
+function M.toggle_layout()
+  if M.is_open() or repl.is_open() then
+    M.close()
+    repl.close()
+  else
+    M.open()
+    repl.open()
+  end
 end
 
 --- Test/dev-only: close and forget the panel instance and its

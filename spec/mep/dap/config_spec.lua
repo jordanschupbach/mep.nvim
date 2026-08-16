@@ -17,7 +17,7 @@ describe('mep.dap.config', function()
     assert.are.equal('▶', config.defaults.signs.stopped.text)
     assert.are.same({ '<leader>db' }, config.defaults.keymaps.toggle_breakpoint)
     assert.are.same({ '<leader>dc' }, config.defaults.keymaps.continue)
-    assert.are.equal('right', config.defaults.sidebar.position)
+    assert.are.equal('left', config.defaults.sidebar.position)
   end)
 
   it('setup({}) returns a copy of the defaults', function()

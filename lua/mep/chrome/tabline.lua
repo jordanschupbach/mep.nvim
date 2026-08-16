@@ -1,7 +1,9 @@
 --- mep.chrome's `'tabline'` target: `widgets_before` (default: a mode
 --- indicator, `mep.chrome.mode`), then one clickable circle per
 --- tabpage (filled = current, hollow = not — clicking one switches to
---- it), then `widgets_after` (default: `+`/`x` to open/close a tab).
+--- it), then `widgets_after` (default: `+`/`x` to open/close a tab),
+--- then `widgets_buttons` right-aligned via a `%=` separator (default:
+--- tests/notifications/git/filetree/symbols panel toggles).
 --- The circles go through the same `mep.chrome.click` widget dispatch
 --- statusline/winbar use (`%N@v:lua.MepChromeClickDispatch@...%X`, see
 --- `mep.chrome.render`'s own header) rather than Neovim's native
@@ -55,25 +57,25 @@ end
 function M.eval()
   local cfg = config.options.tabline
   local ctx = current_ctx()
-  local parts = {}
 
-  if #cfg.widgets_before > 0 then
-    parts[#parts + 1] = (render.render(cfg.widgets_before, ctx))
-  end
-
-  local circles = {}
+  local widgets = {}
+  vim.list_extend(widgets, cfg.widgets_before)
   for i = 1, vim.fn.tabpagenr('$') do
-    circles[#circles + 1] = circle_widget(i)
+    widgets[#widgets + 1] = circle_widget(i)
   end
-  parts[#parts + 1] = (render.render(circles, ctx))
-
-  if #cfg.widgets_after > 0 then
-    parts[#parts + 1] = (render.render(cfg.widgets_after, ctx))
+  vim.list_extend(widgets, cfg.widgets_after)
+  -- `%=` pushes everything after it (the button row) flush against the
+  -- right edge — see `mep.chrome.render`'s own header on the literal
+  -- `'%='` widget-list entry. Only inserted when there's actually a
+  -- button row configured, so a `widgets_buttons = {}` override renders
+  -- exactly as before (no dangling, empty right-aligned section).
+  if cfg.widgets_buttons and #cfg.widgets_buttons > 0 then
+    widgets[#widgets + 1] = '%='
+    vim.list_extend(widgets, cfg.widgets_buttons)
   end
 
-  parts[#parts + 1] = '%#TabLineFill#'
-
-  return table.concat(parts)
+  local rendered = render.render(widgets, ctx)
+  return rendered .. '%#TabLineFill#'
 end
 
 local enabled = false

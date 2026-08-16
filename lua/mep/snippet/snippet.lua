@@ -64,6 +64,13 @@ function M.expand(bufnr, win, replace_len, body)
   session.expand(bufnr, win, replace_len, body)
 end
 
+--- Browse every snippet registered for the current buffer's filetype
+--- (`mep.picker.sources.snippets`) and insert the selected one at the
+--- cursor.
+function M.picker()
+  require('mep.picker').start(require('mep.picker.sources.snippets').picker_opts({}))
+end
+
 local FEED_TAB = vim.api.nvim_replace_termcodes('<Tab>', true, false, true)
 local FEED_S_TAB = vim.api.nvim_replace_termcodes('<S-Tab>', true, false, true)
 
@@ -86,14 +93,24 @@ local function on_shift_tab()
   vim.api.nvim_feedkeys(FEED_S_TAB, 'n', false)
 end
 
---- Configure mep.snippet: `tab_keymap` (see mep.snippet.config.
---- defaults). Works with sensible defaults even if this is never
---- called — only the `<Tab>`/`<S-Tab>` keymaps themselves need setup().
+--- Configure mep.snippet: `tab_keymap`, `builtin_langs`, `keymaps.
+--- picker` (see mep.snippet.config.defaults). Works with sensible
+--- defaults even if this is never called — only the `<Tab>`/`<S-Tab>`/
+--- picker keymaps themselves, and the builtin per-language snippet
+--- registration, need setup().
 function M.setup(opts)
   local options = config.setup(opts)
   if options.tab_keymap then
     vim.keymap.set('i', '<Tab>', on_tab, { desc = 'mep.snippet: expand trigger / jump to next tabstop' })
     vim.keymap.set('i', '<S-Tab>', on_shift_tab, { desc = 'mep.snippet: jump to previous tabstop' })
+  end
+  if options.builtin_langs then
+    for filetype, list in pairs(require('mep.snippet.langs')) do
+      registry.add(filetype, list)
+    end
+  end
+  for _, lhs in ipairs(options.keymaps.picker) do
+    vim.keymap.set('n', lhs, M.picker, { desc = 'mep.snippet: browse/insert a snippet' })
   end
   return options
 end

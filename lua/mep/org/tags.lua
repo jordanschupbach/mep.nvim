@@ -223,10 +223,15 @@ function M.select_interactive(bufnr, lnum, configured_tags, todo_keywords, align
   local map_opts = { buffer = popup_buf, nowait = true, silent = true }
   for _, s in ipairs(shortcuts) do
     if s.key then
-      vim.keymap.set('n', s.key, function()
-        selected[s.tag] = not selected[s.tag]
-        redraw()
-      end, map_opts)
+      vim.keymap.set(
+        'n',
+        s.key,
+        function()
+          selected[s.tag] = not selected[s.tag]
+          redraw()
+        end,
+        vim.tbl_extend('force', map_opts, { desc = 'mep.org.tags: toggle ' .. s.tag })
+      )
     end
   end
 
@@ -243,9 +248,9 @@ function M.select_interactive(bufnr, lnum, configured_tags, todo_keywords, align
       local line = vim.api.nvim_buf_get_lines(bufnr, at - 1, at, false)[1]
       vim.api.nvim_buf_set_lines(bufnr, at - 1, at, false, { M.align_line(line, align_column, todo_keywords) })
     end
-  end, map_opts)
-  vim.keymap.set('n', '<Esc>', close, map_opts)
-  vim.keymap.set('n', 'q', close, map_opts)
+  end, vim.tbl_extend('force', map_opts, { desc = 'mep.org.tags: confirm selection' }))
+  vim.keymap.set('n', '<Esc>', close, vim.tbl_extend('force', map_opts, { desc = 'mep.org.tags: cancel' }))
+  vim.keymap.set('n', 'q', close, vim.tbl_extend('force', map_opts, { desc = 'mep.org.tags: cancel' }))
 end
 
 return M

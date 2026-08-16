@@ -26,6 +26,8 @@ local UI_ICONS = {
   git = '⎇',
   add = '+',
   clear = '🗑',
+  filetree = '🌲',
+  symbols = '📑',
 }
 
 -- Standard Unicode emoji. No special font required — this is the default
@@ -183,6 +185,8 @@ M.ascii = {
     git = 'b',
     add = '+',
     clear = 'x',
+    filetree = 't',
+    symbols = '=',
   },
 }
 

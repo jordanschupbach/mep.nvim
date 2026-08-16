@@ -352,7 +352,11 @@ function M.toggle_help()
     title_pos = 'center',
   })
 
-  local map_opts = { buffer = help_buf, nowait = true, silent = true }
+  local map_opts = vim.tbl_extend(
+    'force',
+    { buffer = help_buf, nowait = true, silent = true },
+    { desc = 'mep.filetree: close keymap help' }
+  )
   vim.keymap.set('n', 'q', close_help, map_opts)
   vim.keymap.set('n', '<Esc>', close_help, map_opts)
   vim.keymap.set('n', '?', close_help, map_opts)

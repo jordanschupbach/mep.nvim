@@ -229,8 +229,24 @@ describe('mep.zen', function()
 
   describe('setup', function()
     it('returns the resolved options', function()
-      local options = zen.setup({ width = 100 })
+      local options = zen.setup({ width = 100, keymaps = { toggle = { '<localleader>zz2' } } })
       assert.are.equal(100, options.width)
+      pcall(vim.keymap.del, 'n', '<localleader>zz2')
+    end)
+
+    it('binds the configured toggle keymap', function()
+      local keymaps = { toggle = { '<localleader>zz1' } }
+      zen.setup({ keymaps = keymaps })
+
+      local found = false
+      for _, m in ipairs(vim.api.nvim_get_keymap('n')) do
+        if m.lhs == vim.api.nvim_replace_termcodes(keymaps.toggle[1], true, false, true) then
+          found = true
+        end
+      end
+      assert.is_true(found)
+
+      pcall(vim.keymap.del, 'n', keymaps.toggle[1])
     end)
   end)
 end)

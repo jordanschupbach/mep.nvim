@@ -1,24 +1,58 @@
---- The tests panel: runs `config.options.tests.cmd` (this project's own
---- `{'busted'}` by default) via `mep.core.job` and shows pass/fail
---- results — a "Run tests" button, a summary line, and one widget per
---- failure; clicking a failure opens a popup with its captured reason.
+--- The tests panel: runs a test runner (`config.options.tests.cmd` if
+--- set — this project's own `{'busted'}` by default — else the
+--- explicit `config.options.tests.runner`, else whichever `mep.
+--- activitybar.test_runners.resolve` auto-detects from `cwd`'s project
+--- marker files) via `mep.core.job` and shows pass/fail results — a
+--- "Run tests" button, a summary line, and one widget per failure;
+--- clicking a failure opens a popup with its captured reason.
 ---
---- **Scope note**: `parse_output` is written against busted's own
---- default terminal reporter output (`"N successes / M failures / ..."`
---- summary line, then a blank-line-or-next-header-delimited `"Failure ->
---- file @ line"`/`"Error -> file @ line"` block per failure) — this
---- project's own test suite, and the format `config.options.tests.cmd`
---- needs to match if you point it at something other than busted. A
---- fully generic "parse any test framework's terminal output" parser
---- isn't attempted; point `cmd` at a JSON/machine-readable reporter and
---- write your own `parse_output` (it only needs to return the shape
---- `sections()` reads: see its own header comment) if your framework's
---- plain text doesn't look like this.
+--- **Scope note**: each runner's own `parse_output` (see `mep.
+--- activitybar.test_runners.busted`/`.go`/`.cargo`/`.jest`/`.pytest`)
+--- is written against that framework's own default terminal reporter
+--- output — a fully generic "parse any test framework's terminal
+--- output" parser isn't attempted anywhere. Point `cmd` at a JSON/
+--- machine-readable reporter and add a new runner module (same
+--- `{ name, cmd, cwd_for, detect, parse_output }` shape, `parse_output`
+--- returning the shape `sections()` reads: see its own header comment)
+--- if your framework's plain text doesn't look like any of these.
 local sidebar_mod = require('mep.sidebar')
 local core = require('mep.core')
 local config = require('mep.activitybar.config')
+local test_runners = require('mep.activitybar.test_runners')
+local busted_runner = require('mep.activitybar.test_runners.busted')
 
 local M = {}
+
+--- Kept as a direct accessor for busted-format text specifically
+--- (rather than "whichever runner is currently configured") — existing
+--- callers exercise this directly against busted's own reporter output;
+--- `mep.activitybar.test_runners.busted.parse_output` is the same
+--- function.
+M.parse_output = busted_runner.parse_output
+
+--- `config.options.tests.cmd` (if set) always wins — a raw override,
+--- always parsed as busted-format output (the original, pre-runner-
+--- registry behavior: there's no way to know what format arbitrary
+--- `cmd` output takes, so this is the same assumption `M.parse_output`
+--- always made). Otherwise `config.options.tests.runner` (an explicit
+--- name from `mep.activitybar.test_runners.registry`) if set, else
+--- auto-detect via `test_runners.resolve(cwd)`.
+local function resolve_runner()
+  local t = config.options.tests
+  if t.cmd then
+    return { cmd = t.cmd, cwd_for = function(cwd)
+      return cwd
+    end, parse_output = busted_runner.parse_output }
+  end
+  if t.runner then
+    local runner = test_runners.registry[t.runner]
+    if runner then
+      return runner
+    end
+    vim.notify('mep.activitybar.tests: unknown runner "' .. tostring(t.runner) .. '"', vim.log.levels.WARN)
+  end
+  return test_runners.resolve(t.cwd)
+end
 
 M.running = false
 M.last_result = nil
@@ -44,53 +78,6 @@ end
 --- whatever its own border reserves).
 local function bar_edge_offset()
   return bar_content_width() + sidebar_mod.border_pad(config.options.border)
-end
-
---- Parse busted-style terminal output `text` into `{ summary (string or
---- nil), successes, failures, errors, pending (numbers, all 0 if no
---- summary line was found), failure_blocks (a list of `{ header, body
---- (list of lines) }`, in output order) }`. A line-based scan, not a
---- single regex: a failure's body runs until the *next*
---- `Failure ->`/`Error ->` header or end of input, which tolerates
---- whichever blank-line spacing convention is around it (busted's own
---- default reporter and running under a different terminal width don't
---- always agree on that).
-function M.parse_output(text)
-  local lines = vim.split(text, '\n', { plain = true })
-  local result = { summary = nil, successes = 0, failures = 0, errors = 0, pending = 0, failure_blocks = {} }
-
-  local i = 1
-  while i <= #lines do
-    -- Lua patterns can't quantify a multi-char group ("(es)?" isn't
-    -- optional-group syntax here, parens are only for captures), so
-    -- "success"/"successes" needs `%a*` (any following letters) rather
-    -- than the `s?`-suffix trick that works fine for "failure(s)"/
-    -- "error(s)" (those only ever add a single trailing "s").
-    local s, f, e, p = lines[i]:match('(%d+) success%a* / (%d+) failures? / (%d+) errors? / (%d+) pending')
-    if s then
-      result.summary = lines[i]
-      result.successes, result.failures, result.errors, result.pending = tonumber(s), tonumber(f), tonumber(e), tonumber(p)
-    end
-
-    local header = lines[i]:match('^Failure %-> (.+)$') or lines[i]:match('^Error %-> (.+)$')
-    if header then
-      local body = {}
-      local j = i + 1
-      while lines[j] and not lines[j]:match('^Failure %-> ') and not lines[j]:match('^Error %-> ') do
-        body[#body + 1] = lines[j]
-        j = j + 1
-      end
-      while #body > 0 and body[#body]:match('^%s*$') do
-        table.remove(body)
-      end
-      result.failure_blocks[#result.failure_blocks + 1] = { header = header, body = body }
-      i = j
-    else
-      i = i + 1
-    end
-  end
-
-  return result
 end
 
 local function refresh()
@@ -131,8 +118,13 @@ local function show_failure_popup(block)
       vim.api.nvim_win_close(win, true)
     end
   end
-  vim.keymap.set('n', 'q', close, map_opts)
-  vim.keymap.set('n', '<Esc>', close, map_opts)
+  vim.keymap.set('n', 'q', close, vim.tbl_extend('force', map_opts, { desc = 'mep.activitybar.tests: close failure popup' }))
+  vim.keymap.set(
+    'n',
+    '<Esc>',
+    close,
+    vim.tbl_extend('force', map_opts, { desc = 'mep.activitybar.tests: close failure popup' })
+  )
 end
 
 --- Run `config.options.tests.cmd`, updating the panel to show "Running
@@ -145,17 +137,18 @@ function M.run()
   M.running = true
   refresh()
 
+  local runner = resolve_runner()
   local stdout = {}
   current_job = core.job.spawn({
-    cmd = config.options.tests.cmd,
-    cwd = config.options.tests.cwd,
+    cmd = runner.cmd,
+    cwd = runner.cwd_for(config.options.tests.cwd),
     on_stdout = function(line)
       stdout[#stdout + 1] = line
     end,
     on_exit = function(_)
       M.running = false
       current_job = nil
-      M.last_result = M.parse_output(table.concat(stdout, '\n'))
+      M.last_result = runner.parse_output(table.concat(stdout, '\n'))
       refresh()
     end,
   })

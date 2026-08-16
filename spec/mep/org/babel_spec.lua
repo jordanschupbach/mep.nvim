@@ -351,6 +351,115 @@ describe('mep.org.babel', function()
     end)
   end)
 
+  describe('cache (:cache yes)', function()
+    local orig_jobstart, orig_executable, orig_notify
+    local spawn_count
+    local captured_opts
+    local notifications
+
+    before_each(function()
+      babel.results_cache = {}
+      orig_jobstart = vim.fn.jobstart
+      orig_executable = vim.fn.executable
+      orig_notify = vim.notify
+      notifications = {}
+      spawn_count = 0
+      vim.notify = function(msg, level)
+        table.insert(notifications, { msg = msg, level = level })
+      end
+      vim.fn.executable = function(name)
+        return name == 'lua' and 1 or 0
+      end
+      vim.fn.jobstart = function(cmd, opts)
+        spawn_count = spawn_count + 1
+        captured_opts = opts
+        return spawn_count
+      end
+    end)
+
+    after_each(function()
+      vim.fn.jobstart = orig_jobstart
+      vim.fn.executable = orig_executable
+      vim.notify = orig_notify
+      babel.results_cache = {}
+    end)
+
+    it('executes normally (spawns a job) without :cache', function()
+      local buf = make_buf({ '#+begin_src lua', 'print(1)', '#+end_src' })
+      babel.execute(buf, 1)
+      assert.are.equal(1, spawn_count)
+    end)
+
+    it('a cache miss executes and stores the result on success', function()
+      local buf = make_buf({ '#+begin_src lua :cache yes', 'print(1)', '#+end_src' })
+      babel.execute(buf, 1)
+      assert.are.equal(1, spawn_count)
+      captured_opts.on_stdout(1, { '1', '' })
+      captured_opts.on_exit(1, 0)
+
+      local block = babel.at_cursor(buf, 1)
+      local key = babel.cache_key(buf, block)
+      assert.are.same({ '1' }, babel.results_cache[key])
+    end)
+
+    it('a cache hit skips core.job.spawn entirely and reuses the cached output', function()
+      local buf = make_buf({ '#+begin_src lua :cache yes', 'print(1)', '#+end_src' })
+      babel.execute(buf, 1)
+      captured_opts.on_stdout(1, { '1', '' })
+      captured_opts.on_exit(1, 0)
+      assert.are.equal(1, spawn_count)
+
+      babel.execute(buf, 1)
+      assert.are.equal(1, spawn_count) -- still 1: no second spawn
+
+      assert.are.same(
+        { '#+begin_src lua :cache yes', 'print(1)', '#+end_src', '#+RESULTS:', ': 1' },
+        vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      )
+    end)
+
+    it('calls on_done with code 0 and the cached output on a cache hit', function()
+      local buf = make_buf({ '#+begin_src lua :cache yes', 'print(1)', '#+end_src' })
+      babel.execute(buf, 1)
+      captured_opts.on_stdout(1, { '1', '' })
+      captured_opts.on_exit(1, 0)
+
+      local done_code, done_stdout
+      babel.execute(buf, 1, function(code, stdout)
+        done_code, done_stdout = code, stdout
+      end)
+      assert.are.equal(0, done_code)
+      assert.are.same({ '1' }, done_stdout)
+    end)
+
+    it('a failed run (nonzero exit) is never cached', function()
+      local buf = make_buf({ '#+begin_src lua :cache yes', 'error("boom")', '#+end_src' })
+      babel.execute(buf, 1)
+      captured_opts.on_stderr(1, { 'boom', '' })
+      captured_opts.on_exit(1, 1)
+
+      local block = babel.at_cursor(buf, 1)
+      local key = babel.cache_key(buf, block)
+      assert.is_nil(babel.results_cache[key])
+
+      -- Re-executing spawns again rather than reusing anything.
+      babel.execute(buf, 1)
+      assert.are.equal(2, spawn_count)
+    end)
+
+    it('editing the block body invalidates the cache (different hash, re-executes)', function()
+      local buf = make_buf({ '#+begin_src lua :cache yes', 'print(1)', '#+end_src' })
+      babel.execute(buf, 1)
+      captured_opts.on_stdout(1, { '1', '' })
+      captured_opts.on_exit(1, 0)
+      assert.are.equal(1, spawn_count)
+
+      vim.api.nvim_buf_set_lines(buf, 1, 2, false, { 'print(2)' })
+      babel.execute(buf, 1)
+      assert.are.equal(2, spawn_count) -- re-executed: body changed, hash differs
+    end)
+  end)
+
   describe('compiled languages (cpp)', function()
     local orig_jobstart, orig_executable, orig_notify
     local calls, notifications

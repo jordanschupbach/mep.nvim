@@ -199,18 +199,23 @@ function M.descend(mode, bufnr, prefix_raw)
 
   local map_opts = { buffer = popup_buf, nowait = true, silent = true }
   for _, g in ipairs(groups) do
-    vim.keymap.set('n', g.key, function()
-      close()
-      local new_prefix = prefix_raw .. to_raw(g.key)
-      if g.is_group then
-        M.descend(mode, bufnr, new_prefix)
-      else
-        M.execute(g.leaf)
-      end
-    end, map_opts)
+    vim.keymap.set(
+      'n',
+      g.key,
+      function()
+        close()
+        local new_prefix = prefix_raw .. to_raw(g.key)
+        if g.is_group then
+          M.descend(mode, bufnr, new_prefix)
+        else
+          M.execute(g.leaf)
+        end
+      end,
+      vim.tbl_extend('force', map_opts, { desc = 'mep.whichkey: ' .. (g.desc or g.key) })
+    )
   end
-  vim.keymap.set('n', '<Esc>', close, map_opts)
-  vim.keymap.set('n', 'q', close, map_opts)
+  vim.keymap.set('n', '<Esc>', close, vim.tbl_extend('force', map_opts, { desc = 'mep.whichkey: close popup' }))
+  vim.keymap.set('n', 'q', close, vim.tbl_extend('force', map_opts, { desc = 'mep.whichkey: close popup' }))
 end
 
 --- Trigger the popup for `human_prefix` (e.g. `'<leader>'`) in `mode`

@@ -49,6 +49,15 @@ describe('mep.chrome.config', function()
     assert.is_function(widgets[2].on_click)
   end)
 
+  it('defaults tabline.widgets_buttons to five panel-toggle widgets', function()
+    local widgets = config.defaults.tabline.widgets_buttons
+    assert.are.equal(5, #widgets)
+    for _, widget in ipairs(widgets) do
+      assert.is_function(widget.text)
+      assert.is_function(widget.on_click)
+    end
+  end)
+
   it('enables all four border sides by default', function()
     assert.are.same({ left = true, right = true, top = true, bottom = true }, config.defaults.border.sides)
   end)

@@ -31,8 +31,13 @@ M.defaults = {
   },
   -- `mep.dap.sidebar`'s own panel (call stack / scopes+variables /
   -- breakpoints) — same shape as `mep.git.config.defaults.sidebar`.
+  -- `position = 'left'` (rather than `mep.git.config`'s `'right'`
+  -- default) mirrors the classic dap-ui layout: stack/scopes/
+  -- breakpoints down the left edge, the debug console (`mep.dap.repl`,
+  -- always a plain bottom split) below — `toggle_sidebar`'s bound
+  -- keymap toggles both together via `M.toggle_layout`.
   sidebar = {
-    position = 'right',
+    position = 'left',
     width = 42,
     height = 15,
     border = 'rounded',

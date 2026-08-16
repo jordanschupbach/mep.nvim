@@ -168,5 +168,55 @@ describe('mep.chrome.tabline', function()
       end)
       assert.are.equal(1, #vim.api.nvim_list_tabpages())
     end)
+
+    describe('widgets_buttons', function()
+      it('renders a %= separator ahead of the button widgets', function()
+        local text = tabline.eval()
+        assert.is_not_nil(text:find('%=', 1, true))
+        assert.is_true(text:find('%=', 1, true) < #text)
+      end)
+
+      it('omits the %= separator entirely when widgets_buttons is empty', function()
+        config.setup({ tabline = { widgets_buttons = {} } })
+        local text = tabline.eval()
+        assert.is_nil(text:find('%=', 1, true))
+      end)
+
+      it('each default button toggles its own panel module', function()
+        local calls = {}
+        local function fake(name)
+          return {
+            toggle = function()
+              calls[#calls + 1] = name
+            end,
+          }
+        end
+        package.loaded['mep.activitybar.tests'] = fake('tests')
+        package.loaded['mep.activitybar.notifications'] = fake('notifications')
+        package.loaded['mep.activitybar.git'] = fake('git')
+        package.loaded['mep.filetree'] = fake('filetree')
+        package.loaded['mep.symbols'] = fake('symbols')
+
+        for _, widget in ipairs(config.options.tabline.widgets_buttons) do
+          widget.on_click()
+        end
+
+        assert.are.same({ 'tests', 'notifications', 'git', 'filetree', 'symbols' }, calls)
+
+        package.loaded['mep.activitybar.tests'] = nil
+        package.loaded['mep.activitybar.notifications'] = nil
+        package.loaded['mep.activitybar.git'] = nil
+        package.loaded['mep.filetree'] = nil
+        package.loaded['mep.symbols'] = nil
+      end)
+
+      it('a button click is a harmless no-op when its target module has no toggle', function()
+        package.loaded['mep.activitybar.tests'] = {}
+        assert.has_no.errors(function()
+          config.options.tabline.widgets_buttons[1].on_click()
+        end)
+        package.loaded['mep.activitybar.tests'] = nil
+      end)
+    end)
   end)
 end)

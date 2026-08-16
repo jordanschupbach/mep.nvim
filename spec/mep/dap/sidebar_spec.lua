@@ -2,6 +2,7 @@ local sidebar = require('mep.dap.sidebar')
 local session = require('mep.dap.session')
 local breakpoints = require('mep.dap.breakpoints')
 local config = require('mep.dap.config')
+local repl = require('mep.dap.repl')
 
 describe('mep.dap.sidebar', function()
   local saved_options
@@ -17,6 +18,7 @@ describe('mep.dap.sidebar', function()
 
   after_each(function()
     sidebar._reset()
+    repl._reset()
     session._reset()
     breakpoints.clear_all()
     config.options = saved_options
@@ -88,6 +90,43 @@ describe('mep.dap.sidebar', function()
       assert.is_true(sidebar.is_open())
       sidebar.toggle()
       assert.is_false(sidebar.is_open())
+    end)
+  end)
+
+  describe('toggle_layout', function()
+    it('opens both the sidebar and the repl console together', function()
+      sidebar.toggle_layout()
+      assert.is_true(sidebar.is_open())
+      assert.is_true(repl.is_open())
+    end)
+
+    it('closes both together on a second call', function()
+      sidebar.toggle_layout()
+      sidebar.toggle_layout()
+      assert.is_false(sidebar.is_open())
+      assert.is_false(repl.is_open())
+    end)
+
+    it('closes both when only the sidebar was open (idempotent sync)', function()
+      sidebar.open()
+      assert.is_true(sidebar.is_open())
+      assert.is_false(repl.is_open())
+
+      sidebar.toggle_layout()
+
+      assert.is_false(sidebar.is_open())
+      assert.is_false(repl.is_open())
+    end)
+
+    it('closes both when only the repl was open (idempotent sync)', function()
+      repl.open()
+      assert.is_false(sidebar.is_open())
+      assert.is_true(repl.is_open())
+
+      sidebar.toggle_layout()
+
+      assert.is_false(sidebar.is_open())
+      assert.is_false(repl.is_open())
     end)
   end)
 

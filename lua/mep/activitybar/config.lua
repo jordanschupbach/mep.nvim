@@ -64,9 +64,18 @@ M.defaults = {
     -- argv for the test runner mep.activitybar.tests shells out to via
     -- mep.core.job — this project's own `busted` by default; point it
     -- at whatever your project actually uses (e.g. `{'npm', 'test'}`).
+    -- Takes priority over `runner`/auto-detection whenever set (as it
+    -- is here by default) — set this to `nil` to let `runner` or
+    -- `mep.activitybar.test_runners.resolve` pick instead.
     cmd = { 'busted' },
     -- Working directory for `cmd`. `nil` means the current cwd.
     cwd = nil,
+    -- Explicit runner name (`'go'`/`'cargo'`/`'jest'`/`'pytest'`/
+    -- `'busted'`, keys of `mep.activitybar.test_runners.registry`) to
+    -- use instead of auto-detecting one from `cwd`'s project marker
+    -- files — only consulted when `cmd` above is `nil`. `nil` (the
+    -- default) auto-detects.
+    runner = nil,
   },
 }
 

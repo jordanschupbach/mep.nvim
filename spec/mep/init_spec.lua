@@ -12,6 +12,7 @@ local sidebar_config = require('mep.sidebar.config')
 local notify_config = require('mep.notify.config')
 local activitybar_config = require('mep.activitybar.config')
 local lsp_config = require('mep.lsp.config')
+local diagnostics_config = require('mep.diagnostics.config')
 local completion_config = require('mep.completion.config')
 local url_config = require('mep.url.config')
 local git_config = require('mep.git.config')
@@ -34,6 +35,8 @@ local repl_config = require('mep.repl.config')
 local snippet_config = require('mep.snippet.config')
 local todoscan_config = require('mep.todoscan.config')
 local zen_config = require('mep.zen.config')
+local clipboard_config = require('mep.clipboard.config')
+local bib_config = require('mep.bib.config')
 
 -- Every library's config module, keyed by the same name `mep.setup()`'s
 -- own `opts.<name>` uses — driven by a table (not one named local per
@@ -55,6 +58,7 @@ local CONFIG_MODULES = {
   { name = 'notify', mod = notify_config },
   { name = 'activitybar', mod = activitybar_config },
   { name = 'lsp', mod = lsp_config },
+  { name = 'diagnostics', mod = diagnostics_config },
   { name = 'completion', mod = completion_config },
   { name = 'url', mod = url_config },
   { name = 'git', mod = git_config },
@@ -77,10 +81,13 @@ local CONFIG_MODULES = {
   { name = 'snippet', mod = snippet_config },
   { name = 'todoscan', mod = todoscan_config },
   { name = 'zen', mod = zen_config },
+  { name = 'clipboard', mod = clipboard_config },
+  { name = 'bib', mod = bib_config },
 }
 
 describe('mep (top-level setup fan-out)', function()
   local saved_leader, saved_localleader
+  local saved_clipboard, saved_g_clipboard
   local saved_options = {}
   local orig_install_all, orig_install
   local orig_notify
@@ -90,6 +97,8 @@ describe('mep (top-level setup fan-out)', function()
   before_each(function()
     saved_leader = vim.g.mapleader
     saved_localleader = vim.g.maplocalleader
+    saved_clipboard = vim.o.clipboard
+    saved_g_clipboard = vim.g.clipboard
     for _, entry in ipairs(CONFIG_MODULES) do
       saved_options[entry.name] = vim.deepcopy(entry.mod.options)
     end
@@ -156,6 +165,12 @@ describe('mep (top-level setup fan-out)', function()
     -- mep.symbols.setup() binds a real, global toggle keymap the same
     -- way (<leader>ll by default).
     pcall(vim.keymap.del, 'n', '<leader>ll')
+    -- mep.diagnostics.setup() binds a real, global show-line-float
+    -- keymap the same way (<leader>ld by default), and leaves a real
+    -- `MepDiagnostics` augroup (`DiagnosticChanged`) registered — its
+    -- own `_reset()` is the correct teardown for the latter.
+    pcall(vim.keymap.del, 'n', '<leader>ld')
+    require('mep.diagnostics')._reset()
     -- mep.dap.setup() binds real, global keymaps for every configured
     -- action (10 by default, <leader>d*) — mep.dap.keymaps.bind's own
     -- unconditional global-keymap posture (debugging isn't filetype/
@@ -217,12 +232,23 @@ describe('mep (top-level setup fan-out)', function()
       end
     end
     -- mep.snippet.setup()'s default tab_keymap=true binds real, global
-    -- insert-mode <Tab>/<S-Tab> keymaps.
+    -- insert-mode <Tab>/<S-Tab> keymaps, and its default keymaps.picker
+    -- binds a real, global <leader>yy the same way.
     pcall(vim.keymap.del, 'i', '<Tab>')
     pcall(vim.keymap.del, 'i', '<S-Tab>')
+    pcall(vim.keymap.del, 'n', '<leader>yy')
+    -- mep.bib.setup() binds a real, global insert-citation keymap the
+    -- same way (<localleader>ir by default).
+    pcall(vim.keymap.del, 'n', '<localleader>ir')
 
     vim.g.mapleader = saved_leader
     vim.g.maplocalleader = saved_localleader
+    -- mep.clipboard.setup()'s default unnamedplus=true sets the real,
+    -- global 'clipboard' option, and (only over a real SSH session with
+    -- no local tool found, not the case in this test environment, but
+    -- restored defensively anyway) vim.g.clipboard.
+    vim.o.clipboard = saved_clipboard
+    vim.g.clipboard = saved_g_clipboard
     for _, entry in ipairs(CONFIG_MODULES) do
       entry.mod.options = saved_options[entry.name]
     end
@@ -330,6 +356,8 @@ describe('mep (top-level setup fan-out)', function()
     -- mep.zen.setup() itself only stores config, but a test could go on
     -- to actually toggle zen mode.
     require('mep.zen')._reset()
+    -- mep.zen.setup() binds a real, global toggle keymap the same way.
+    pcall(vim.keymap.del, 'n', '<leader>zz')
   end)
 
   it('setup({}) applies each library\'s defaults', function()

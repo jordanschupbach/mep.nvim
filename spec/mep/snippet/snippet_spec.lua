@@ -41,6 +41,7 @@ describe('mep.snippet', function()
     session._reset()
     pcall(vim.keymap.del, 'i', '<Tab>')
     pcall(vim.keymap.del, 'i', '<S-Tab>')
+    pcall(vim.keymap.del, 'n', '<leader>yy')
     -- A couple of tests below keep Insert mode active (via startinsert)
     -- across an assertion so an end-of-line tabstop's column isn't
     -- clamped away by Normal-mode cursor rules; a failed assertion would
@@ -105,6 +106,15 @@ describe('mep.snippet', function()
     end)
   end)
 
+  describe('picker', function()
+    it('opens a mep.picker instance', function()
+      snippet.picker()
+      local win = vim.api.nvim_get_current_win()
+      assert.are.equal('editor', vim.api.nvim_win_get_config(win).relative)
+      vim.api.nvim_win_close(win, true)
+    end)
+  end)
+
   describe('setup', function()
     it('binds <Tab>/<S-Tab> in insert mode by default', function()
       snippet.setup({})
@@ -121,6 +131,37 @@ describe('mep.snippet', function()
     it('returns the resolved options', function()
       local options = snippet.setup({ tab_keymap = false })
       assert.is_false(options.tab_keymap)
+    end)
+
+    it('registers the builtin per-language snippets by default', function()
+      snippet.setup({})
+      assert.is_not_nil(registry.find('lua', 'fun'))
+      assert.is_not_nil(registry.find('python', 'def'))
+      assert.is_not_nil(registry.find('go', 'func'))
+      assert.is_not_nil(registry.find('rust', 'fn'))
+      assert.is_not_nil(registry.find('c', 'main'))
+      assert.is_not_nil(registry.find('javascript', 'func'))
+      assert.is_not_nil(registry.find('typescript', 'func'))
+      assert.is_not_nil(registry.find('sh', 'sh'))
+      assert.is_not_nil(registry.find('bash', 'sh'))
+    end)
+
+    it('does not register builtin langs when builtin_langs = false', function()
+      snippet.setup({ builtin_langs = false })
+      assert.is_nil(registry.find('lua', 'fun'))
+    end)
+
+    it('binds the configured picker keymap', function()
+      snippet.setup({ keymaps = { picker = { '<localleader>yy1' } } })
+      local resolved = vim.api.nvim_replace_termcodes('<localleader>yy1', true, false, true)
+      local found = false
+      for _, m in ipairs(vim.api.nvim_get_keymap('n')) do
+        if m.lhs == resolved then
+          found = true
+        end
+      end
+      assert.is_true(found)
+      pcall(vim.keymap.del, 'n', '<localleader>yy1')
     end)
   end)
 

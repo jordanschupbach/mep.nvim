@@ -1132,6 +1132,43 @@ describe('mep.org.org', function()
     end)
   end)
 
+  describe('babel status annotation', function()
+    local babelhl = require('mep.org.babelhl')
+
+    it('is applied to src blocks in an activated buffer by default', function()
+      stub_install()
+      org.setup({ fold = false })
+
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_set_current_buf(buf)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '#+begin_src lua', 'print(1)', '#+end_src' })
+      vim.bo[buf].filetype = 'org'
+
+      local ns = vim.api.nvim_create_namespace('mep_org_babel_status')
+      local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, {})
+      assert.are.equal(1, #marks)
+    end)
+
+    it('is skipped entirely when babel_status_highlight = false', function()
+      stub_install()
+      org.setup({ fold = false, babel_status_highlight = false })
+
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_set_current_buf(buf)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '#+begin_src lua', 'print(1)', '#+end_src' })
+      vim.bo[buf].filetype = 'org'
+
+      local ns = vim.api.nvim_create_namespace('mep_org_babel_status')
+      assert.are.same({}, vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, {}))
+    end)
+
+    it('MepOrgBabelStatus resolves to a highlight group after setup', function()
+      stub_install()
+      org.setup({ fold = false })
+      assert.is_not_nil(vim.api.nvim_get_hl(0, { name = babelhl.hl_group }))
+    end)
+  end)
+
   describe('headline color highlight', function()
     local headlinehl = require('mep.org.headlinehl')
 

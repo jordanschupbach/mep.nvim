@@ -83,6 +83,11 @@ M.defaults = {
   -- `Constant` by default — see mep.org.resultshl). Set to false to
   -- leave them with no color of their own.
   results_block_highlight = true,
+  -- Annotate the end of each `#+end_src` line with its language's LSP
+  -- status and whether its last run was served from `:cache yes`
+  -- (linked to `Comment` by default — see mep.org.babelhl). Set to
+  -- false to leave src blocks with no annotation.
+  babel_status_highlight = true,
   -- Give each headline level its own distinct color (level 1 blue,
   -- cycling through a fixed 6-color rotation after that — see
   -- mep.org.headlinehl's own `LINKS` table) instead of every level

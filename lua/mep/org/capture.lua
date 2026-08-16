@@ -287,10 +287,10 @@ function M.open_popup(template, text, cursor_offset)
     local final_lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
     vim.api.nvim_win_close(win, true)
     M.finalize(template, final_lines)
-  end, map_opts)
+  end, vim.tbl_extend('force', map_opts, { desc = 'mep.org.capture: finalize capture' }))
   vim.keymap.set('n', '<C-c><C-k>', function()
     vim.api.nvim_win_close(win, true)
-  end, map_opts)
+  end, vim.tbl_extend('force', map_opts, { desc = 'mep.org.capture: abort capture' }))
 end
 
 --- Start a capture with `template`, using `trigger_buf`/`trigger_lnum`

@@ -23,6 +23,7 @@ describe('mep.activitybar.config', function()
     assert.are.equal('git', config.defaults.buttons[4].id)
     assert.is_nil(config.defaults.todo.persist_path)
     assert.are.same({ 'busted' }, config.defaults.tests.cmd)
+    assert.is_nil(config.defaults.tests.runner)
   end)
 
   it('setup({}) returns a copy of the defaults', function()

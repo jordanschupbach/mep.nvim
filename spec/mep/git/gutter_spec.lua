@@ -170,7 +170,7 @@ describe('mep.git.gutter', function()
       assert.are.equal(1, marks[1][2]) -- row 2 (1-based) -> 0-based extmark row 1
       -- Neovim right-pads a single-display-cell sign_text to the 2-cell
       -- signcolumn width when storing an extmark, hence trim() here.
-      assert.are.equal('~', vim.trim(marks[1][4].sign_text))
+      assert.are.equal('|', vim.trim(marks[1][4].sign_text))
       assert.are.equal('MepGitChange', marks[1][4].sign_hl_group)
     end)
 

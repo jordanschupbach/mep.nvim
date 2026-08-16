@@ -144,6 +144,50 @@ describe('mep.activitybar.tests', function()
       tests_mod.run()
       assert.are.same({ 'npm', 'test' }, cmd)
     end)
+
+    it('uses the explicit tests.runner when cmd is unset', function()
+      -- config.setup() can't represent "explicitly unset cmd" — a
+      -- nil-valued table key is indistinguishable from an absent one in
+      -- Lua, so the deep-merge would just keep the default `{'busted'}`
+      -- — clear it directly on the resolved options instead.
+      config.setup({ tests = { runner = 'cargo' } })
+      config.options.tests.cmd = nil
+      local cmd
+      vim.fn.jobstart = function(c)
+        cmd = c
+        return 1
+      end
+      tests_mod.run()
+      assert.are.same({ 'cargo', 'test' }, cmd)
+    end)
+
+    it('auto-detects a runner from cwd when both cmd and runner are unset', function()
+      local dir = vim.fn.resolve(vim.fn.tempname())
+      vim.fn.mkdir(dir, 'p')
+      vim.fn.writefile({ 'module x' }, dir .. '/go.mod')
+      config.setup({ tests = { cwd = dir } })
+      config.options.tests.cmd = nil
+      local cmd
+      vim.fn.jobstart = function(c)
+        cmd = c
+        return 1
+      end
+      tests_mod.run()
+      assert.are.same({ 'go', 'test', '-v', './...' }, cmd)
+    end)
+
+    it('parses on_exit output through the resolved runner, not always busted', function()
+      config.setup({ tests = { runner = 'cargo' } })
+      config.options.tests.cmd = nil
+      tests_mod.run()
+      captured_opts.on_stdout(
+        42,
+        { 'test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out', '' }
+      )
+      captured_opts.on_exit(42, 1)
+      assert.are.equal(1, tests_mod.last_result.successes)
+      assert.are.equal(1, tests_mod.last_result.failures)
+    end)
   end)
 
   describe('sections', function()

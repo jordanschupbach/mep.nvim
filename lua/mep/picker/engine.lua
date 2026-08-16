@@ -166,25 +166,26 @@ end
 function Picker:setup_keymaps()
   local buf = self.layout.prompt_buf
   local map_opts = { buffer = buf, silent = true, nowait = true }
-  local function map_all(lhs_list, fn)
+  local function map_all(lhs_list, fn, desc)
+    local opts = vim.tbl_extend('force', map_opts, { desc = desc })
     for _, lhs in ipairs(lhs_list) do
-      vim.keymap.set({ 'i', 'n' }, lhs, fn, map_opts)
+      vim.keymap.set({ 'i', 'n' }, lhs, fn, opts)
     end
   end
 
   local keymaps = picker_config.options.keymaps
   map_all(keymaps.select, function()
     self:select()
-  end)
+  end, 'mep.picker: select')
   map_all(keymaps.close, function()
     self:close()
-  end)
+  end, 'mep.picker: close')
   map_all(keymaps.next, function()
     self:move(1)
-  end)
+  end, 'mep.picker: next item')
   map_all(keymaps.prev, function()
     self:move(-1)
-  end)
+  end, 'mep.picker: previous item')
 end
 
 function Picker:setup_autocmds()
