@@ -1,0 +1,121 @@
+local patterns = require('mep.colorizer.patterns')
+
+describe('mep.colorizer.patterns', function()
+  describe('find_hex', function()
+    it('matches a 6-digit hex color', function()
+      local s, e, hex = patterns.find_hex('color: #FF00AA;')
+      assert.are.equal(8, s)
+      assert.are.equal(14, e)
+      assert.are.equal('#ff00aa', hex)
+    end)
+
+    it('normalizes a 3-digit shorthand by doubling each digit', function()
+      local _, _, hex = patterns.find_hex('color: #f0a;')
+      assert.are.equal('#ff00aa', hex)
+    end)
+
+    it('normalizes an 8-digit hex+alpha, dropping the alpha', function()
+      local _, _, hex = patterns.find_hex('#ff00aa80')
+      assert.are.equal('#ff00aa', hex)
+    end)
+
+    it('normalizes a 4-digit shorthand+alpha, dropping the alpha', function()
+      local _, _, hex = patterns.find_hex('#f0a8')
+      assert.are.equal('#ff00aa', hex)
+    end)
+
+    it('skips a hex run of invalid length (e.g. 5 or 7 digits)', function()
+      assert.is_nil(patterns.find_hex('#abcde'))
+      assert.is_nil(patterns.find_hex('#abcdefa'))
+    end)
+
+    it('returns nil when there is no #', function()
+      assert.is_nil(patterns.find_hex('no colors here'))
+    end)
+
+    it('finds the next match starting from init', function()
+      local line = '#fff #000'
+      local s1 = patterns.find_hex(line)
+      local s2 = patterns.find_hex(line, s1 + 1)
+      assert.are.equal(6, s2)
+    end)
+  end)
+
+  describe('find_rgb', function()
+    it('matches rgb() and converts to hex', function()
+      local s, e, hex = patterns.find_rgb('background: rgb(255, 0, 170);')
+      assert.are.equal('#ff00aa', hex)
+      assert.are.equal('rgb(255, 0, 170)', ('background: rgb(255, 0, 170);'):sub(s, e))
+    end)
+
+    it('matches rgba() and drops the alpha', function()
+      local _, _, hex = patterns.find_rgb('rgba(0, 128, 255, 0.5)')
+      assert.are.equal('#0080ff', hex)
+    end)
+
+    it('tolerates extra whitespace', function()
+      local _, _, hex = patterns.find_rgb('rgb( 10 , 20 , 30 )')
+      assert.are.equal('#0a141e', hex)
+    end)
+
+    it('skips an out-of-range component', function()
+      assert.is_nil(patterns.find_rgb('rgb(300, 0, 0)'))
+    end)
+
+    it('returns nil when there is no rgb()/rgba() call', function()
+      assert.is_nil(patterns.find_rgb('no colors here'))
+    end)
+  end)
+
+  describe('find_named', function()
+    it('matches a bare named color', function()
+      local s, e, hex = patterns.find_named('color: red;')
+      assert.are.equal('#ff0000', hex)
+      assert.are.equal('red', ('color: red;'):sub(s, e))
+    end)
+
+    it('is case-insensitive', function()
+      local _, _, hex = patterns.find_named('RED')
+      assert.are.equal('#ff0000', hex)
+    end)
+
+    it('does not match a named color embedded inside a longer identifier', function()
+      assert.is_nil(patterns.find_named('red_value'))
+      assert.is_nil(patterns.find_named('xred'))
+      assert.is_nil(patterns.find_named('red2'))
+    end)
+
+    it('does match a named color that is a whole word amid punctuation', function()
+      assert.is_not_nil(patterns.find_named('(red)'))
+      assert.is_not_nil(patterns.find_named('red,green'))
+    end)
+
+    it('returns nil for a word that is not a registered color name', function()
+      assert.is_nil(patterns.find_named('hello world'))
+    end)
+  end)
+
+  describe('find_all', function()
+    it('finds every kind of match in one line, left to right, non-overlapping', function()
+      local matches = patterns.find_all('a: #fff; b: rgb(0,0,0); c: red;')
+      assert.are.equal(3, #matches)
+      assert.are.equal('#ffffff', matches[1].hex)
+      assert.are.equal('#000000', matches[2].hex)
+      assert.are.equal('#ff0000', matches[3].hex)
+      assert.is_true(matches[1].start_col < matches[2].start_col)
+      assert.is_true(matches[2].start_col < matches[3].start_col)
+    end)
+
+    it('returns {} for a line with no colors', function()
+      assert.are.same({}, patterns.find_all('nothing to see here'))
+    end)
+
+    it('does not re-match inside an already-consumed span', function()
+      -- "red" is a substring of "darkred" — the named-color word-boundary
+      -- rule should mean only "darkred" itself matches, once.
+      local matches = patterns.find_all('darkred')
+      assert.are.equal(1, #matches)
+      assert.are.equal('#8b0000', matches[1].hex)
+    end)
+  end)
+end)

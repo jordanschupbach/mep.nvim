@@ -174,6 +174,17 @@ Layer your own icons on top of (or instead of) the built-ins per style via
 `overrides`, e.g. `overrides = { emoji = { by_extension = { lua = '🌛' } } }`
 — see `lua/mep/icons/data.lua` for the full built-in tables.
 
+A small curated **"UI action" icon set** — bell/checkmark/play/branch/
+plus/trash, keyed by semantic name (`notifications`/`todo`/`tests`/
+`git`/`add`/`clear`) rather than glyph shape — sits alongside the file/
+directory tables, for callers that need a small fixed icon rather than
+one keyed by file content: `mep.activitybar`'s own bar buttons and todo/
+tests panel actions use it (`require('mep.icons').get_ui_icon('git')`),
+so they respect `setup({ style = ... })` the same way file icons do.
+These are already plain, universally-renderable symbols rather than
+font-dependent glyphs, so `nerd_font` and `emoji` share the same set;
+only `ascii` meaningfully differs.
+
 ### `mep.filetree` — a file tree sidebar, using mep.icons
 
 `mep.filetree` has no icon-style option of its own — it always renders
@@ -222,6 +233,531 @@ full defaults.
 - `MepIconDirectory` — directory icons (links to `Directory`)
 - `MepFiletreeDirectory` — directory names in the tree (links to `Directory`)
 
+### `mep.symbols` — an LSP-backed symbols outline
+
+A single persistent panel (like `mep.filetree`, only one at a time)
+showing whatever the client attached to the current buffer reports for
+`textDocument/documentSymbol` — classes, methods, functions, variables,
+enums, and so on, filetype-specific purely because that's whatever the
+attached server understands for that filetype (no client attached, or
+one that doesn't support the method, shows a message instead of erroring).
+
+Unlike `mep.filetree`'s tabpage-edge-anchored tree, this one splits the
+*current* window itself (`<leader>ll` by default) — sized to
+`config.options.width_ratio` (a quarter, by default) of that window's
+width, on the right — since it's tied to one specific buffer's symbols,
+not a project-wide view. `<CR>` on a symbol jumps to it in the buffer
+the outline was opened for; `R` re-requests symbols on demand, and a
+`BufWritePost` on that buffer does the same automatically.
+
+| Command               | Lua API                              | What it does                            |
+|-------------------------|-----------------------------------------|--------------------------------------------|
+| `:MepSymbolsToggle`   | `require('mep.symbols').toggle()`    | Open/close the outline for the current buffer |
+| `:MepSymbolsRefresh`  | `require('mep.symbols').refresh()`   | Re-request symbols for the open outline |
+
+#### Keymaps inside the outline (normal mode)
+
+| Key            | Action                                          |
+|-----------------|--------------------------------------------------|
+| `<CR>`          | Jump to the symbol under the cursor               |
+| `q` / `<Esc>`   | Close the outline                                 |
+| `R`             | Refresh                                            |
+
+All configurable via `require('mep.symbols').setup({...})` —
+`width_ratio`, `min_width`, `position` (`'left'`/`'right'`),
+`keymaps.jump`/`close`/`refresh`, and `triggers.toggle` (the global
+`<leader>ll` keymap, bound outside the panel itself — `mep.picker`'s
+own `triggers` pattern). See `lua/mep/symbols/config.lua` for the full
+defaults.
+
+```lua
+require('mep.symbols').setup({}) -- width_ratio=0.25, min_width=20, position='right', triggers.toggle={'<leader>ll'}
+require('mep.symbols').setup({ position = 'left', width_ratio = 0.3 })
+require('mep.symbols').setup({ triggers = { toggle = { '<leader>o' } } }) -- rebind the global toggle
+```
+
+#### Highlight groups
+
+- `MepSymbolsTitle` — the outline's winbar title (links to `Title`)
+- `MepSymbolsKind` — the `[KindName]` tag on each symbol line (links to `Comment`)
+
+### `mep.hints` — jump-to-location hints, hop.nvim/flash.nvim-style
+
+A pure Lua overlay (extmarks, no external dependency) that labels
+locations in the current window's visible lines and jumps the cursor
+there once you type the label — real editing, not an LSP inlay hint or a
+static cheatsheet. Two modes:
+
+- **`require('mep.hints').char_search()`** — prompts (blocking) for one
+  character, then labels every occurrence of it visible in the current
+  window.
+- **`require('mep.hints').word_start()`** — labels every visible word
+  start immediately, no prompt.
+
+Either way: zero matches just notifies; exactly one jumps straight there
+with no label shown at all; more than one overlays a label (drawn from
+`config.options.labels`, home-row order by default) on top of each
+match's own first column(s) — single characters while the match count
+fits the charset, two-character combinations beyond that (never mixed,
+so a pressed key is never ambiguous between a whole label and half of a
+longer one). `<Esc>`/`<C-c>`, or any key that matches no label, cancels
+cleanly with no jump.
+
+```lua
+require('mep.hints').setup({}) -- labels='asdfghjklqwertyuiopzxcvbnm', triggers.char/word unbound
+require('mep.hints').setup({ triggers = { char = { 's' }, word = { 'w' } } }) -- hop.nvim's own bindings
+require('mep.hints').setup({ labels = 'abcdefghijklmnopqrstuvwxyz' }) -- alphabetical instead of home-row
+```
+
+Both `triggers.char`/`triggers.word` are unbound by default (`false`/an
+empty list) — mep.picker's own `triggers` pattern — since there's no
+single obvious default keymap to claim for either mode.
+
+#### Highlight groups
+
+- `MepHintMatch` — the matched span underneath a label (links to `Search`)
+- `MepHintLabel` — the label glyph(s) overlaid on top of the match (links to `ErrorMsg`)
+
+### `mep.dap` — a native Debug Adapter Protocol client
+
+No external `nvim-dap` dependency — `mep.dap.client`/`mep.dap.protocol`
+speak DAP directly (`Content-Length`-framed JSON, the same base protocol
+LSP itself uses) over a spawned adapter process' own stdio, the same
+"drive the real protocol natively" posture `mep.lsp` already takes with
+`vim.lsp.config`/`vim.lsp.enable` instead of wrapping lspconfig.
+
+- **`mep.dap.adapters`** — a curated registry (`debugpy`/`lldb_dap`/
+  `netcoredbg`/`delve`, `{ cmd, filetypes }` shaped like `mep.lsp.servers.
+  registry`) of common adapters. **Unlike** that LSP registry, these
+  `cmd`s are each adapter's documented stdio invocation, not
+  independently verified against a live install — DAP adapters are far
+  less standardized about transport than language servers (most were
+  built for VS Code's own socket-based extension host). Treat `cmd` as a
+  starting point; override per-adapter via `adapters = { <name> = { cmd =
+  {...} } }`. Adapter binaries are BYO, same install-it-yourself contract
+  as `mep.lsp`'s own servers.
+- **`mep.dap.breakpoints`** — session-only (not persisted), keyed by
+  absolute file path so a breakpoint set once reappears in any buffer
+  that later reopens the same file. `toggle(bufnr, lnum)`/`list(bufnr)`/
+  `clear(bufnr)`/`clear_all()`; sign-column gutter (`MepDapBreakpoint`),
+  `attach(bufnr)`/`detach(bufnr)` re-render it on `BufReadPost`.
+- **`mep.dap.session`** — the single active session (only one debuggee at
+  a time, like `mep.ai`'s single in-flight job): `launch(adapter_name,
+  args)`/`attach(adapter_name, args)` run the full DAP handshake
+  (`initialize` -> `launch`/`attach` -> wait for the adapter's own
+  `initialized` event -> push every recorded breakpoint via
+  `setBreakpoints` -> `configurationDone`); `launch_interactive()`
+  prompts (`vim.ui.select`/`vim.ui.input`) for both. `continue`/
+  `step_over`/`step_into`/`step_out`/`terminate`/`evaluate(expression,
+  callback)` control it; a `stopped` event fetches the call stack, the
+  top frame's scopes and their variables, and jumps the editor there
+  (`MepDapStopped` sign). `subscribe(fn)` hears every change
+  (`'stopped'`/`'output'`/`'stack_updated'`/...) — what `mep.dap.sidebar`/
+  `mep.dap.repl` render from.
+- **`mep.dap.sidebar`** — a `mep.sidebar`-built panel (call stack /
+  scopes+variables / breakpoints), redrawing itself on `mep.dap.session.
+  subscribe` and `mep.dap.breakpoints.on_change`.
+- **`mep.dap.repl`** — a persistent console buffer accumulating the
+  adapter's own `output` events; `evaluate_interactive()` prompts for an
+  expression and appends both it and its result.
+
+```lua
+require('mep.dap').setup({}) -- keymaps.toggle_breakpoint=<leader>db, continue=<leader>dc, ...
+require('mep.dap').setup({ adapters = { debugpy = { cmd = { 'python', '-m', 'debugpy.adapter' } } } })
+require('mep.dap').session.launch('debugpy', { program = '/path/to/script.py' })
+```
+
+| Command                    | Lua API                                     | What it does                            |
+|------------------------------|------------------------------------------------|--------------------------------------------|
+| `:MepDapToggleBreakpoint`  | `require('mep.dap').breakpoints.toggle(...)`  | Toggle a breakpoint on the current line   |
+| `:MepDapLaunch`            | `require('mep.dap').session.launch_interactive()` | Start a session (prompts for adapter + program) |
+| `:MepDapContinue`          | `require('mep.dap').session.continue()`       | Continue the active session               |
+| `:MepDapTerminate`         | `require('mep.dap').session.terminate()`      | Terminate the active session              |
+| `:MepDapSidebar`           | `require('mep.dap').sidebar.toggle()`         | Toggle the debug sidebar                  |
+| `:MepDapRepl`              | `require('mep.dap').repl.toggle()`            | Toggle the debug console                  |
+
+#### Highlight groups
+
+- `MepDapBreakpoint` — the breakpoint gutter sign (links to `DiagnosticError`)
+- `MepDapStopped` — the current-line sign where execution is paused (links to `DiagnosticWarn`)
+- `MepDapReplTitle` — the debug console's winbar title (links to `Title`)
+
+### `mep.docs` — docstring generation and external doc lookup
+
+- **`mep.docs.generate`** (`<leader>ld` by default) — inserts a language-
+  appropriate doc-comment skeleton for the function on the cursor line.
+  Tries `mep.docs.lsp` first (a real `textDocument/signatureHelp`
+  request — the same one `mep.lsp`'s own `<C-k>` makes — parsed into a
+  plain function name and parameter list) when a capable client is
+  attached; falls back to `mep.docs.parser`'s own single-line regex scan
+  of the cursor's line otherwise. Curated for `python`/`lua`/`go`/`rust`/
+  `ruby`/`javascript`/`typescript`(`react` variants)/`c`/`cpp`/`java`
+  (`mep.docs.templates.docstring`) — Google-style for Python, LDoc/
+  EmmyLua (`---@param`) for Lua, rustdoc, YARD, godoc's own bare-summary
+  convention, and JSDoc/Doxygen/Javadoc sharing one `/** ... */` shape.
+  `'below'`-position languages (Python) nest one level deeper than the
+  function line, matching `'expandtab'`/`'shiftwidth'`; `'above'`-
+  position ones share its own indentation.
+- **`mep.docs.lookup`** (`<leader>lD` by default) — opens external
+  documentation for the word under the cursor via `mep.url.open` (`vim.
+  ui.open`, no in-editor scraping/fetching): a devdocs.io instant-search
+  deep link (`https://devdocs.io/#q=...`), biased toward the right doc
+  set via a per-filetype hint (`mep.docs.templates.doc_hints`) when one's
+  curated — **not** a verified devdocs slug/scoping syntax (same caveat
+  `mep.dap.adapters`'s own header comment documents for its `cmd`s), just
+  the doc set's own display name, which devdocs' search already matches
+  loosely; a filetype with no entry still gets a working, if unscoped,
+  search.
+
+```lua
+require('mep.docs').setup({}) -- keymaps.generate=<leader>ld, lookup=<leader>lD
+require('mep.docs').setup({ doc_hints = { python = 'python~3.13' } }) -- pin a devdocs version slug
+```
+
+| Command                | Lua API                          | What it does                                    |
+|--------------------------|-------------------------------------|------------------------------------------------------|
+| `:MepDocsGenerate`     | `require('mep.docs').generate()` | Insert a docstring skeleton for the current function  |
+| `:MepDocsLookup`       | `require('mep.docs').lookup()`   | Open external docs for the word under cursor          |
+
+### `mep.flashcards` — spaced-repetition review, org-drill style
+
+Review sessions over org headlines tagged `config.options.tag` (`:drill:`
+by default, inheritance-aware — a headline under a `:drill:`-tagged
+parent counts too, `mep.org.tags.effective_tags`), collected across
+`config.options.drill_files` (`mep.flashcards.collect`, the exact same
+literal-path/glob-pattern shape `mep.org.agenda`'s own `agenda_files`
+uses — this library reuses `mep.org.agenda.files` itself to resolve
+them).
+
+- **Scheduling** (`mep.flashcards.sm2`) — the classic SM-2 algorithm
+  (Wozniak, 1987; the same core Anki and real org-drill both build on),
+  a 4-button grade vocabulary (again/hard/good/easy, mapped onto SM-2's
+  own 0-5 quality scale) rather than the full 6-point one. State (`:
+  DRILL_EF:`/`:DRILL_REPS:`/`:DRILL_INTERVAL:`/`:DRILL_DUE:`) lives in
+  the headline's own `:PROPERTIES:` drawer via `mep.org.property`
+  (`mep.flashcards.state`) — reusing that existing store rather than a
+  separate one, and buffer-only like every other write this project
+  makes to your files (`mep.org.agenda`'s own TODO-cycle keymap
+  included) — your own save workflow persists it.
+- **Review UI** (`mep.flashcards.review`, `:MepFlashcardsReview` /
+  `require('mep.flashcards').review_session()`, default `<leader>fr`) —
+  one card at a time in a floating popup: the headline title as the
+  question, `<CR>`/`<Space>` reveals the body as the answer (`mep.
+  flashcards.body`, everything up to the next headline at any level, so
+  a child headline's own content isn't pulled in as part of this card's
+  answer), then `a`/`h`/`g`/`e` grades it and advances. A no-op (with a
+  notification) when nothing's due.
+
+```lua
+require('mep.flashcards').setup({ drill_files = { '~/notes/*.org' } })
+require('mep.flashcards').setup({ tag = 'flashcard' }) -- use :flashcard: instead of :drill:
+```
+
+```org
+* Capital of France? :drill:
+Paris.
+```
+
+### `mep.help` — a generated vimdoc, plus a searchable command/keymap/docs picker
+
+Two independent pieces:
+
+- **`doc/mep.txt`** — a real Neovim vimdoc, condensed from this README's
+  own per-library sections, with a `*mep-<name>*` tag per library
+  (`*mep-hints*`, `*mep-dap*`, ...) so `:help mep` / `:help mep-symbols`
+  work through Neovim's native help system. Run `:helptags` on this
+  repo's own `doc/` directory once after installing if your plugin
+  manager doesn't do that automatically (most do).
+- **`mep.help.picker`** (`:MepHelp` / `require('mep.help').picker()`,
+  default `<leader>?`) — a `mep.picker`-backed searchable index over
+  three existing sources, not a separate store: every curated library's
+  one-line description (`mep.help.descriptions`, `<CR>` opens its
+  `:help` tag), every visible Ex command (`mep.picker.sources.commands`,
+  `<CR>` runs it, prompting for args first if it takes any), and every
+  visible normal-mode keymap (`mep.whichkey.registry`, `<CR>` executes
+  it exactly as if pressed — `mep.whichkey`'s own dispatch, real Neovim
+  built-ins aren't included since `nvim_get_keymap` only ever reports
+  user-defined mappings).
+
+```lua
+require('mep.help').setup({}) -- keymaps.picker=<leader>?
+require('mep.help').setup({ descriptions = { my_lib = { desc = 'my own library', tag = 'my-lib' } } })
+```
+
+### `mep.colorizer` — highlight colors, in any buffer
+
+Detects `#rgb`/`#rrggbb`/`#rrggbbaa`, `rgb()`/`rgba()`, and the full
+standard CSS named-color list (`mep.colorizer.names`, from MDN's own
+reference table) in any buffer, rendering either a background swatch
+over the matched text (foreground auto-picked black/white for contrast,
+perceived-brightness heuristic) or an inline swatch character just
+before it — extmarks, same overlay technique `mep.markdown.tables` uses
+for its own cell borders. Attach/detach lifecycle (debounced recompute
+on `TextChanged`/`TextChangedI`/`BufWritePost`) mirrors `mep.markdown.
+gutter`'s own; the global auto-attach-by-filetype wiring mirrors `mep.
+git.gutter`'s own `enable()`/`disable()`.
+
+```lua
+require('mep.colorizer').setup({}) -- mode='background', every filetype
+require('mep.colorizer').setup({ mode = 'swatch' }) -- ● before each match instead
+require('mep.colorizer').setup({ filetypes = { 'css', 'html', 'lua' } }) -- restrict where it activates
+```
+
+### `mep.leetcode` — local problem execution, plus opt-in live submission
+
+Local problem files (`.org`, one per problem, under `config.options.
+problems_dir`): `#+TITLE:`/`#+PROPERTY: LEETCODE_SLUG ...`/`#+PROPERTY:
+LEETCODE_DIFFICULTY ...` file keywords, a `* Prompt` headline, a
+`* Solution` headline with the editable src block (the file's *first* src
+block), and a `* Tests` headline with one src block per sample test (every
+block *after* the first). `mep.leetcode.picker` (`:MepLeetcode` /
+`require('mep.leetcode').picker()`, default `<leader>lc`) browses/opens
+them.
+
+- **Running tests** (`:MepLeetcodeRunTests` / `require('mep.leetcode').
+  run_tests()`) splices the Solution block's body above each Test
+  block's own body into one combined src block in a throwaway scratch
+  buffer, then runs it through `mep.org.babel.execute` itself — the same
+  language dispatch (interpreter/compiler resolution, compile-then-run,
+  `wrap_main`, ...) real org-babel execution already goes through, not a
+  separate implementation of it. Pass/fail is left entirely to whatever
+  the test code itself prints (a boolean comparison, an assertion,
+  `"Test 1: PASS"`, ...) — notified per test as raw output, plus a final
+  summary.
+- **Live mode** (opt-in, network calls only from these two actions) —
+  `:MepLeetcodeFetch` / `require('mep.leetcode').fetch_interactive()`
+  fetches a problem's statement/starter code by its URL slug and writes
+  it as a new local file; `:MepLeetcodeSubmit` / `require('mep.leetcode').
+  submit()` submits the current file's Solution block and polls for a
+  verdict. Both go through LeetCode's own unofficial (reverse-engineered
+  — the query/endpoint shapes community tools like leetcode-cli use, not
+  independently verified against a live account from this project's own
+  dev environment) GraphQL + REST API, via real `curl` subprocesses
+  (`mep.leetcode.api`, the same job-running idiom `mep.ai`'s own request
+  path uses). Credentials are two browser cookie values from a
+  logged-in LeetCode session (`LEETCODE_SESSION`/`csrftoken`, copied out
+  of your browser's devtools), read from environment variables
+  (`config.options.session_cookie_env`/`csrf_token_env`) — never
+  hardcoded.
+
+```lua
+require('mep.leetcode').setup({}) -- problems_dir=stdpath('data')/mep_leetcode, default_language='python'
+require('mep.leetcode').setup({ default_language = 'go' })
+```
+
+| Command                  | Lua API                                        | What it does                              |
+|-----------------------------|----------------------------------------------------|------------------------------------------------|
+| `:MepLeetcode`           | `require('mep.leetcode').picker()`             | Browse/open local problems                |
+| `:MepLeetcodeRunTests`   | `require('mep.leetcode').run_tests()`          | Run sample tests for the current problem  |
+| `:MepLeetcodeFetch`      | `require('mep.leetcode').fetch_interactive()`  | Fetch a problem (live mode) into a new local file |
+| `:MepLeetcodeSubmit`     | `require('mep.leetcode').submit()`             | Submit the current Solution block (live mode) |
+
+### `mep.roam` — org-roam-style note linking
+
+Zettelkasten-style notes over plain org headlines — no separate ID/link
+mechanism: every piece below builds on `mep.org.id.get_or_create` (a
+note's own first headline gets a stable `:ID:` property, generated the
+first time anything needs it) and `mep.org.link` (`[[id:...][title]]`,
+this project's own existing link syntax).
+
+- **`mep.roam.picker`** (`:MepRoamInsert` / `require('mep.roam').
+  picker()`, default `<leader>rf`) — fuzzy search note titles
+  (`#+TITLE:`, or the first headline's own title) across `config.
+  options.roam_dirs` (recursively), `<CR>` inserts a `[[id:...][title]]`
+  link at the cursor.
+- **`mep.roam.backlinks`** (`:MepRoamBacklinks` / `require('mep.roam').
+  toggle_backlinks()`, default `<leader>rb`) — a `mep.sidebar` panel
+  (like `mep.symbols`' own single-instance outline) listing every note
+  that links to the current note's own ID; `<CR>` on an entry jumps to
+  the linking headline.
+- **`mep.roam.daily`** (`:MepRoamToday` / `require('mep.roam').today()`,
+  default `<leader>rt`) — opens (creating if missing)
+  `roam_dirs[1]/daily/YYYY-MM-DD.org`, an existing file opened as-is;
+  a new one's initial content comes from `config.options.daily_template`
+  (`mep.org.capture`'s own placeholder syntax — `%T`/`%?`/`%^{PROMPT}`/
+  ..., reused directly rather than a separate templating mechanism).
+- **`mep.roam.create`** (`:MepRoamNew` / `require('mep.roam').
+  new_note()`, default `<leader>rc`) — prompts for a title, creates
+  `roam_dirs[1]/<slugified-title>.org` with a `* <title>` headline and a
+  fresh `:ID:` already attached.
+
+```lua
+require('mep.roam').setup({ roam_dirs = { '~/notes/roam' } })
+require('mep.roam').setup({ daily_template = '#+TITLE: %T\n\n* Log\n%?' })
+```
+
+| Command              | Lua API                              | What it does                       |
+|-------------------------|------------------------------------------|-----------------------------------------|
+| `:MepRoamInsert`     | `require('mep.roam').picker()`         | Search notes, insert a link to one |
+| `:MepRoamBacklinks`  | `require('mep.roam').toggle_backlinks()` | Toggle the backlinks panel         |
+| `:MepRoamToday`      | `require('mep.roam').today()`          | Open (or create) today's daily note |
+| `:MepRoamNew`        | `require('mep.roam').new_note()`       | Create a new note (prompts for a title) |
+
+### `mep.run` — a play button: run the current file
+
+`:MepRun` / `require('mep.run').run_current_file()` (default `<leader>xr`)
+runs the current buffer's own file through its filetype's own
+interpreter/compiler, output going to a real `:terminal` split
+(`mep.project`'s own terminal-split usage as precedent) — reusing `mep.
+org.babel`'s existing per-language resolution (`resolve_executable`/
+`run_cmd`/`compile_cmd`/`run_compiled_cmd`) rather than a separate
+interpreter table, most Neovim filetypes already matching a babel
+language key directly (`python` -> `python`, `go` -> `go`, ...; `mep.run.
+languages` covers the handful that don't, e.g. `cs` -> `csharp`). Unlike
+`mep.org.babel.execute` (which runs a *copy* of a src block's body, with
+`:main yes` able to wrap bare statements), this runs the file exactly as
+it already is on disk — a play button presumes a complete, already-
+runnable program.
+
+`require('mep.run').widget()` is a `mep.chrome`-widget-shaped table
+(`{ text, on_click }`) for a clickable ▶ button — `mep.chrome` and
+`mep.run` are independent libraries, composed only via config, like
+every other pairing in this project:
+
+```lua
+require('mep.run').setup({}) -- terminal_height_ratio=0.3, keymaps.run=<leader>xr
+require('mep.chrome').setup({ winbar = { widgets = { require('mep.run').widget() } } })
+```
+
+### `mep.repl` — a per-filetype REPL, in a real terminal split
+
+One REPL kept alive per filetype (`config.options.scope = 'buffer'` for
+one per source buffer instead) in a real `:terminal` split — `mep.run`'s
+own no-shell `vim.fn.jobstart(cmd, { term = true })` idiom, and `mep.
+project`'s own terminal-split usage as precedent for the split itself.
+`send_line`/`send_selection`/`send_buffer` write to it via `vim.fn.
+chansend`. Starting a REPL as a side effect of a send call (the first
+one for a given filetype/buffer) briefly focuses the new split, then
+returns focus to wherever it was — sending a line shouldn't strand you
+in the REPL window. `mep.repl.registry` is a curated filetype -> launch-
+command table (BYO interpreter on PATH, `mep.org.babel`'s own language
+table as precedent for the pattern, though not the same table — a REPL
+launch command is a different program/flags than "run this script file",
+e.g. Python's REPL is a bare `python3`, not `python3 <file>`) covering
+languages with a real, standard, interactive REPL (Python/Lua/JS/Ruby/R/
+Julia/Clojure/Haskell/OCaml/PHP/Elixir/Scala/bash) — several `mep.org.
+babel` supports for script execution (C/C++/Rust/Go/Java/...) have no
+comparably standard interactive mode and are deliberately left out.
+
+```lua
+require('mep.repl').setup({}) -- scope='filetype', keymaps.send_line=<leader>sl, send_selection=<leader>ss (visual), send_buffer=<leader>sb, jump_to_repl=<leader>sr, jump_back=<leader>sc
+require('mep.repl').setup({ scope = 'buffer' })
+require('mep.repl').setup({ commands = { python = { 'ipython' } } })
+```
+
+`jump_back` (default `<leader>sc`) is bound buffer-local, inside each
+REPL terminal buffer this library creates itself — not globally, since
+there's no single "current code buffer" to jump back to from just
+anywhere.
+
+| Command                      | Lua API                                   | What it does                     |
+|----------------------------------|------------------------------------------------|---------------------------------------|
+| `:MepReplSendLine`           | `require('mep.repl').send_line()`             | Send the current line            |
+| `:MepReplSendSelection`      | `require('mep.repl').send_selection(...)`      | Send a line range (visual range-capable) |
+| `:MepReplSendBuffer`         | `require('mep.repl').send_buffer()`            | Send the whole buffer            |
+| `:MepReplJump`               | `require('mep.repl').jump_to_repl()`           | Jump to (starting if needed) the REPL window |
+
+### `mep.snippet` — a tabstop/placeholder snippet engine
+
+A full tabstop/placeholder expansion engine in plain Lua — no textmate/
+VSCode JSON format. `$1`/`${1}` bare tabstops, `${1:default}` with a
+pre-filled placeholder, `$0` as the final cursor position (synthesized at
+the end of the snippet if the body doesn't include one). Stops are
+tracked with **extmarks, not frozen positions** — the same idiom `mep.ai`
+uses for its own streaming-insert landing spot, adapted from a single
+tracked point to a tracked range (independent start/end gravity, so
+typing inside a stop grows it in place).
+
+Snippets are registered per filetype, in plain Lua:
+
+```lua
+require('mep.snippet').add('lua', {
+  { trigger = 'fn', body = 'function $1($2)\n\t$0\nend' },
+})
+```
+
+`<Tab>` (configurable, `tab_keymap = false` to opt out of both keymaps
+entirely) expands the trigger word immediately before the cursor — even
+outside `mep.completion`'s own popup — or jumps to the next tabstop if a
+snippet is already being navigated; `<S-Tab>` jumps backward. Neither
+falls back to a *selected* placeholder (no Neovim Select-mode
+integration) — jumping to a stop with a default just places the cursor
+at its start; same for a same-index tabstop reused more than once in one
+body (`$1` twice) — each occurrence navigates independently rather than
+mirroring live edits between them.
+
+```lua
+require('mep.snippet').setup({}) -- tab_keymap = true
+require('mep.snippet').setup({ tab_keymap = false }) -- don't bind <Tab>/<S-Tab> at all
+```
+
+A fourth `mep.completion` source (`sources = {'lsp','buffer','path',
+'snippet'}`, now the default) surfaces registered triggers in the same
+popup — see that library's own section below, including how accepting a
+snippet-shaped item (from this source, or an LSP completion whose
+`insertTextFormat` is `Snippet`) now expands through this engine instead
+of inserting `$1`/`$0` placeholders as literal text.
+
+### `mep.todoscan` — a project-wide TODO/FIXME/HACK/NOTE comment scanner
+
+Explicitly distinct from `mep.activitybar`'s own manual, persisted todo
+list — no shared data store between the two; this library only ever
+*reads* comments already in the code, never writes anything.
+
+`:MepTodoScan` (`require('mep.todoscan').picker()`) opens a `mep.picker`-
+backed list of every configured keyword found across the project — `rg`
+when available (respects `.gitignore`, skips `.git`, the same
+optional-external-tool posture `mep.picker.find_files`/`live_grep` take
+toward it), falling back to a synchronous walk+grep otherwise. `<CR>`
+jumps to the comment.
+
+Every open, file-backed buffer also gets **live in-buffer marking** —
+a sign-column glyph plus a highlight group on the matched word itself
+(`MepTodoScanTodo`/`Fixme`/`Hack`/`Note` for the default four keywords,
+derived the same way for any custom keyword) — recomputed on a debounce
+after text changes/saves, the same "debounced attach/detach lifecycle"
+`mep.git.gutter` uses (`config.options.highlight = false` to opt out).
+
+```lua
+require('mep.todoscan').setup({}) -- keywords={'TODO','FIXME','HACK','NOTE'}, debounce_ms=300, highlight=true
+require('mep.todoscan').setup({ keywords = { 'TODO', 'XXX' } })
+require('mep.todoscan').setup({ highlight = false }) -- picker only, no live in-buffer marking
+require('mep.todoscan').setup({ signs = { TODO = '!!' } }) -- override a keyword's sign-column glyph
+```
+
+| Command         | Lua API                             | What it does                                  |
+|------------------|-----------------------------------------|----------------------------------------------------|
+| `:MepTodoScan`  | `require('mep.todoscan').picker()`  | Search TODO/FIXME/HACK/NOTE comments across the project |
+
+### `mep.zen` — zen mode: hide the chrome, center the buffer
+
+`:MepZenToggle` (`require('mep.zen').toggle()`) hides `mep.activitybar`,
+closes `mep.filetree`/`mep.symbols` if open, turns off the gutter
+(`number`/`relativenumber`/`signcolumn` on the current window — the same
+window-local save/restore idiom `mep.dashboard.ui` uses for its own
+gutter suppression) and `mep.chrome`'s statusline/winbar/statuscolumn,
+then centers the current window's buffer toward `config.width` columns
+(default 90) by adding two blank, `winfixwidth` padding splits — real
+windows, not a virtual margin. Exiting restores the exact prior state:
+only a target that was actually open/enabled before entering zen mode
+gets reopened/re-enabled again, and the padding splits just close.
+
+Every piece is individually toggleable (`config.hide`, same
+"everything independently disableable" convention `mep.sanity` uses),
+and each of `mep.activitybar`/`mep.filetree`/`mep.symbols`/`mep.chrome`
+is a soft, optional dependency — using zen mode without one of them
+loaded just skips that piece.
+
+```lua
+require('mep.zen').setup({}) -- width=90, hide={activitybar=true, filetree=true, symbols=true, gutter=true, chrome=true}
+require('mep.zen').setup({ width = 120 })
+require('mep.zen').setup({ hide = { chrome = false } }) -- leave the statusline/winbar/statuscolumn alone
+```
+
+| Command         | Lua API                        | What it does        |
+|------------------|-------------------------------------|--------------------------|
+| `:MepZenToggle` | `require('mep.zen').toggle()`  | Toggle zen mode      |
+
 ### `mep.picker` — search and pick, with a preview sidebar
 
 A `Picker` (`lua/mep/picker/engine.lua`) drives a floating-window layout —
@@ -229,7 +765,7 @@ prompt on top, results below it, preview sidebar on the right — with fuzzy
 matching (`mep.picker.matcher`, a dependency-free fzf-style subsequence
 scorer) and live preview of the selected item.
 
-Four ready-made pickers, each its own source module under
+Five ready-made pickers, each its own source module under
 `lua/mep/picker/sources/`:
 
 | Command            | Lua API                          | What it searches                              |
@@ -238,10 +774,15 @@ Four ready-made pickers, each its own source module under
 | `:MepLiveGrep`      | `require('mep.picker').live_grep()`    | File contents across the project, via `rg` (required) |
 | `:MepBufferSearch`  | `require('mep.picker').buffer_search()`| Lines of the current buffer                     |
 | `:MepBuffers`       | `require('mep.picker').buffers()`      | Open (listed, loaded) buffers, most recently used first |
+| `:MepCommands`      | `require('mep.picker').commands()`     | User-defined Ex commands (buffer-local + global, `:Mep*` included) |
 
 `find_files`/`live_grep`/`buffers` accept an optional `opts` table (`{ cwd
 = ... }` for the first two, none for `buffers`); `buffer_search` takes
-`{ bufnr = ..., winid = ... }`.
+`{ bufnr = ..., winid = ... }`; `commands` takes `{ bufnr = ... }`
+(default the current buffer), scoping which buffer-local commands are
+included alongside every global one. `<CR>` on a command runs it
+directly, or prompts (`vim.ui.input`) for its argument text first if its
+`nargs` calls for any.
 
 #### Keymaps inside the picker (prompt window, insert or normal mode)
 
@@ -1010,18 +1551,45 @@ shaded fenced-code-block backgrounds.
   fenced (` ``` `/`~~~`) code block, fence lines included, with
   `MepMarkdownCodeBlock` (linked to `CursorLine` by default) so code
   reads as a distinct block instead of blending into surrounding prose.
+- **Checkbox toggling** (`mep.markdown.checkbox`, `<C-c><C-c>` by
+  default) — GFM task-list checkboxes (`- [ ]`/`- [x]`, and their
+  numbered-list equivalent `1. [ ]`), mirroring `mep.org.checkbox`.
+  Real org-mode's own `<C-c><C-c>` convention, free to reuse here since
+  markdown has no babel-execute dual purpose to disambiguate from the
+  way `mep.org`'s own `<C-c><C-c>` does.
+- **Folding** (`mep.markdown.fold`, `<Tab>`/`za` to toggle) —
+  ATX-heading-depth folding, mirroring `mep.org.fold`: a heading's fold
+  swallows its body text and every shallower-nested heading's own
+  content as one block; a fenced code block gets its own nested fold one
+  level deeper, foldable independently of the rest of its section.
+- **Link/emphasis concealment** (`mep.markdown.linkconceal`) — hides
+  raw `[text](url)`/`**bold**`/`*italic*`/`__bold__`/`_italic_`/
+  `~~strike~~` syntax, showing only the rendered text, mirroring `mep.
+  org.linkconceal`. Pure line-pattern matching (not tree-sitter,
+  deliberately — same "works immediately, even before/without the
+  parser installed" reasoning `mep.org`'s own structural modules
+  document), a known simplification of full CommonMark emphasis-
+  flanking rules (escaped `\*`, code spans, and nested emphasis aren't
+  specially handled). Needs `'conceallevel'` >= 2, set automatically on
+  windows showing an activated buffer.
+- **Front matter** (`mep.markdown.frontmatter`) — recognizes a YAML
+  (`---`)/TOML (`+++`) block at the very top of the file (real static-
+  site-generator convention) and shades it with `MepMarkdownFrontmatter`
+  (linked to `ColorColumn` by default), the same overlay-extmark
+  shading `mep.markdown.codeblocks` uses for fenced code.
 
 ```lua
-require('mep.markdown').setup({}) -- highlight=true, headers=true, emphasis=true, gutter=true, gutter_symbols={'①',...,'⑥'}, tables=true, code_blocks=true
+require('mep.markdown').setup({}) -- highlight=true, headers=true, emphasis=true, gutter=true, gutter_symbols={'①',...,'⑥'}, tables=true, code_blocks=true, checkbox=true, fold=true, conceal=true, frontmatter=true
 ```
 
-Header/table/code-block groups use `default = true` (only claims a
-group nothing else has already defined — same convention as every
-other `MepXxx` group in this codebase), so a colorscheme that sets its
-own `@markup.heading.1`..`.6`/`MepMarkdownTable*`/`MepMarkdownCodeBlock`
-wins; emphasis always overrides, layering color onto whatever
-bold/italic weight is already there. No dedicated toggle command — like
-`mep.org`, it activates automatically via `FileType`.
+Header/table/code-block/frontmatter groups use `default = true` (only
+claims a group nothing else has already defined — same convention as
+every other `MepXxx` group in this codebase), so a colorscheme that
+sets its own `@markup.heading.1`..`.6`/`MepMarkdownTable*`/
+`MepMarkdownCodeBlock`/`MepMarkdownFrontmatter` wins; emphasis always
+overrides, layering color onto whatever bold/italic weight is already
+there. No dedicated toggle command — like `mep.org`, it activates
+automatically via `FileType`.
 
 ### `mep.whichkey` — a popup showing what's bound under a prefix key
 
@@ -1252,6 +1820,15 @@ either, a status panel you glance at rather than one that interrupts
 whatever you were typing. Switch into any of them (e.g. `<C-w>w`, or
 just click) to use their keymaps.
 
+Every button/action icon — the four bar buttons, plus the todo panel's
+own "Add"/"Clear done" and the tests panel's own "Run tests" — comes
+from `mep.icons`'s own curated UI icon set (`require('mep.icons').
+get_ui_icon(...)`, see that library's own section above), so `require(
+'mep.icons').setup({ style = 'ascii' })` restyles this bar the same way
+it restyles `mep.filetree`. Set a `buttons` entry's own `icon` field
+(e.g. `{ id = 'notifications', icon = '🔕' }`) to override just that one
+regardless of style.
+
 - **Notifications** — a view onto `mep.notify`'s own entry list (see
   above), not a separate history of its own — `setup()` installs `mep.
   notify`'s `vim.notify` hook, which also drives that library's own
@@ -1395,7 +1972,7 @@ whatever `'completeopt'` held beforehand on `disable()`. Without
 match into the buffer as you keep typing, which reads as completion
 "happening automatically" instead of a suggestion you accept.
 
-Three built-in sources, queried together and merged (first-listed
+Four built-in sources, queried together and merged (first-listed
 source wins a duplicate `word`):
 
 - **`lsp`** — queries every LSP client attached to the buffer that
@@ -1419,10 +1996,14 @@ source wins a duplicate `word`):
   needed.
 - **`path`** — filesystem entries, once the text right before the cursor
   looks like `/some/dir/partial-name`.
+- **`snippet`** — `mep.snippet`'s own registered per-filetype triggers
+  (see that library's own section above) — a soft, optional dependency
+  the same way `lsp` is soft on `mep.org` (`mep.completion` stays fully
+  functional without `mep.snippet` loaded at all).
 
 ```lua
-require('mep.completion').setup({}) -- sources={'lsp','buffer','path'}, debounce_ms=80, min_chars=1, max_items=50, auto_trigger=true
-require('mep.completion').setup({ sources = { 'buffer' } }) -- no LSP/path, just buffer words
+require('mep.completion').setup({}) -- sources={'lsp','buffer','path','snippet'}, debounce_ms=80, min_chars=1, max_items=50, auto_trigger=true
+require('mep.completion').setup({ sources = { 'buffer' } }) -- no LSP/path/snippet, just buffer words
 require('mep.completion').setup({ auto_trigger = false }) -- only open the popup via <C-Space>
 ```
 
@@ -1439,12 +2020,17 @@ reference for the simplest possible (fully synchronous) source;
 **Scope notes**: `lsp` uses `item.insertText or item.label` against a
 simple keyword-prefix replacement range, not the item's own (possibly
 different) `textEdit` range — adequate for the common case, not a full
-LSP `textEdit` implementation; snippet-shaped `insertText` is inserted
-as literal text, not expanded (this project has no snippet engine of
-its own). `path` is keyed off the *same* keyword-shaped prefix every
-other source uses rather than a separate path-shaped one — see the
-module's own header comment for why that turns out not to be a
-limitation in practice.
+LSP `textEdit` implementation. Snippet-shaped `insertText`
+(`insertTextFormat = Snippet`) and `snippet` source items both carry
+their body along as a `user_data` marker; accepting either still inserts
+that word as plain text first (`vim.fn.complete()`'s own behavior,
+nothing to hook mid-accept), then `mep.completion.engine`'s own
+`CompleteDone` handler swaps it for the real tabstop expansion via
+`mep.snippet.expand` — a soft dependency, this all still no-ops cleanly
+if `mep.snippet` isn't loaded. `path` is keyed off the *same*
+keyword-shaped prefix every other source uses rather than a separate
+path-shaped one — see the module's own header comment for why that
+turns out not to be a limitation in practice.
 
 ### `mep.url` — find and open URLs in any buffer
 

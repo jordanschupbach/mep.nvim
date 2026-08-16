@@ -39,4 +39,41 @@ describe('mep.activitybar.config', function()
     config.setup({ panel_width = 60 })
     assert.are.equal(42, config.defaults.panel_width)
   end)
+
+  it('defaults.buttons entries set no icon of their own', function()
+    for _, b in ipairs(config.defaults.buttons) do
+      assert.is_nil(b.icon)
+    end
+  end)
+
+  describe('icon_for', function()
+    local icons_config = require('mep.icons.config')
+    local saved_icons_options
+
+    before_each(function()
+      saved_icons_options = vim.deepcopy(icons_config.options)
+    end)
+
+    after_each(function()
+      icons_config.options = saved_icons_options
+    end)
+
+    it('resolves via mep.icons.get_ui_icon(id) when no explicit icon is set', function()
+      assert.are.equal('🔔', config.icon_for({ id = 'notifications' }))
+    end)
+
+    it('prefers an explicit icon override over the mep.icons lookup', function()
+      assert.are.equal('🔕', config.icon_for({ id = 'notifications', icon = '🔕' }))
+    end)
+
+    it('follows mep.icons.setup({ style = ... }) — no caching', function()
+      assert.are.equal('🔔', config.icon_for({ id = 'notifications' }))
+      icons_config.setup({ style = 'ascii' })
+      assert.are.equal('!', config.icon_for({ id = 'notifications' }))
+    end)
+
+    it('falls back to an empty string for an id with no curated UI icon', function()
+      assert.are.equal('', config.icon_for({ id = 'nope' }))
+    end)
+  end)
 end)

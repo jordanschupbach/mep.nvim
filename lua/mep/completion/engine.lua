@@ -140,6 +140,56 @@ function M.trigger(bufnr, win, options, override_min_chars)
   end
 end
 
+--- Decode `user_data` (a `complete-items` string field) as this
+--- module's own snippet-body marker (`mep.completion.sources.snippet`/
+--- the snippet-shaped-`insertText` branch of `mep.completion.sources.
+--- lsp` both set it via `M.encode_snippet_user_data`) — the raw body
+--- string if it is one, `nil` otherwise (a plain string, unrelated
+--- JSON, or empty).
+local function decode_snippet_user_data(user_data)
+  if not user_data or user_data == '' then
+    return nil
+  end
+  local ok, decoded = pcall(vim.json.decode, user_data)
+  if ok and type(decoded) == 'table' and decoded.mep_snippet then
+    return decoded.body
+  end
+  return nil
+end
+M._decode_snippet_user_data = decode_snippet_user_data
+
+--- JSON-encode `body` as this module's own snippet-body `user_data`
+--- marker — see `decode_snippet_user_data` above.
+function M.encode_snippet_user_data(body)
+  return vim.json.encode({ mep_snippet = true, body = body })
+end
+
+--- Closes the gap `mep.completion.sources.lsp`'s own header comment
+--- used to note: a completion item whose `user_data` carries a snippet
+--- body (LSP `insertTextFormat = Snippet`, or `mep.completion.sources.
+--- snippet`'s own trigger items) gets accepted by `vim.fn.complete()`
+--- as a literal string first (Neovim's own behavior, nothing to hook
+--- mid-accept) — this undoes exactly that insertion (its own `item.
+--- word` byte length, nothing more) and expands the real snippet body
+--- through `mep.snippet` in its place. A soft dependency (`pcall`
+--- `require`d here, not at module load) — mep.completion stays fully
+--- functional without `mep.snippet` present.
+local function on_complete_done()
+  local item = vim.v.completed_item
+  if not item or not item.word or item.word == '' then
+    return
+  end
+  local body = decode_snippet_user_data(item.user_data)
+  if not body then
+    return
+  end
+  local ok, snippet = pcall(require, 'mep.snippet')
+  if not ok then
+    return
+  end
+  snippet.expand(vim.api.nvim_get_current_buf(), vim.api.nvim_get_current_win(), #item.word, body)
+end
+
 --- Register the global `TextChangedI` autocmd (completion is relevant
 --- in any buffer — not filetype/buffer-scoped the way `mep.org`/`mep.
 --- treesitter` activate) that debounce-triggers `M.trigger` for
@@ -168,6 +218,11 @@ function M.enable()
   vim.api.nvim_create_autocmd('TextChangedI', {
     group = state.augroup,
     callback = debounced,
+  })
+
+  vim.api.nvim_create_autocmd('CompleteDone', {
+    group = state.augroup,
+    callback = on_complete_done,
   })
 
   for _, lhs in ipairs(config.options.keymaps.trigger) do

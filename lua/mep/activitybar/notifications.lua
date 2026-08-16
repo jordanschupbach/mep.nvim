@@ -22,7 +22,7 @@ local M = {}
 local function bar_content_width()
   local width = 1
   for _, b in ipairs(config.options.buttons) do
-    width = math.max(width, vim.fn.strdisplaywidth(b.icon or ''))
+    width = math.max(width, vim.fn.strdisplaywidth(config.icon_for(b)))
   end
   return width
 end

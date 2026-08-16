@@ -269,6 +269,67 @@ describe('mep.completion.engine', function()
     end)
   end)
 
+  describe('encode_snippet_user_data / _decode_snippet_user_data', function()
+    it('round-trips a snippet body', function()
+      local encoded = engine.encode_snippet_user_data('function $1($2)\n\t$0\nend')
+      assert.are.equal('function $1($2)\n\t$0\nend', engine._decode_snippet_user_data(encoded))
+    end)
+
+    it('returns nil for an empty/nil/unrelated user_data string', function()
+      assert.is_nil(engine._decode_snippet_user_data(nil))
+      assert.is_nil(engine._decode_snippet_user_data(''))
+      assert.is_nil(engine._decode_snippet_user_data('plain string'))
+      assert.is_nil(engine._decode_snippet_user_data('{"other":true}'))
+    end)
+  end)
+
+  describe('CompleteDone handling', function()
+    local orig_snippet, orig_completed_item
+
+    before_each(function()
+      orig_snippet = package.loaded['mep.snippet']
+      orig_completed_item = vim.v.completed_item
+    end)
+
+    after_each(function()
+      package.loaded['mep.snippet'] = orig_snippet
+      vim.v.completed_item = orig_completed_item
+      engine.disable()
+    end)
+
+    it('expands the real snippet body once a snippet-shaped item is accepted', function()
+      local expand_call
+      package.loaded['mep.snippet'] = {
+        expand = function(bufnr, win, replace_len, body)
+          expand_call = { bufnr = bufnr, win = win, replace_len = replace_len, body = body }
+        end,
+      }
+      engine.enable()
+      local buf, win = make_buf_win({ 'fn' })
+      vim.api.nvim_set_current_win(win)
+      vim.v.completed_item = { word = 'fn', user_data = engine.encode_snippet_user_data('function $1($2)\n\t$0\nend') }
+      vim.api.nvim_exec_autocmds('CompleteDone', { buffer = buf })
+
+      assert.is_not_nil(expand_call)
+      assert.are.equal(2, expand_call.replace_len) -- #"fn"
+      assert.are.equal('function $1($2)\n\t$0\nend', expand_call.body)
+    end)
+
+    it('does nothing for a plain (non-snippet) accepted item', function()
+      local called = false
+      package.loaded['mep.snippet'] = {
+        expand = function()
+          called = true
+        end,
+      }
+      engine.enable()
+      local buf = make_buf_win({ 'foo' })
+      vim.v.completed_item = { word = 'foo', user_data = '' }
+      vim.api.nvim_exec_autocmds('CompleteDone', { buffer = buf })
+      assert.is_false(called)
+    end)
+  end)
+
   describe('enable / disable', function()
     after_each(function()
       engine.disable()

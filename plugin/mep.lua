@@ -30,6 +30,20 @@ local function set_highlights()
   vim.api.nvim_set_hl(0, 'MepDashboardLink', { link = 'Underlined', default = true })
   vim.api.nvim_set_hl(0, 'MepSidebarTitle', { link = 'Title', default = true })
   vim.api.nvim_set_hl(0, 'MepSidebarSectionHeader', { link = 'Statement', default = true })
+  vim.api.nvim_set_hl(0, 'MepSymbolsTitle', { link = 'Title', default = true })
+  vim.api.nvim_set_hl(0, 'MepSymbolsKind', { link = 'Comment', default = true })
+  -- mep.hints.ui also defines these itself (same reasoning as the
+  -- MepGit*/MepWindowTab* groups above — so they still look right under
+  -- the busted/nlua test harness, which never loads this file), repeated
+  -- here so they get reapplied on a real `:colorscheme` change too.
+  vim.api.nvim_set_hl(0, 'MepHintMatch', { link = 'Search', default = true })
+  vim.api.nvim_set_hl(0, 'MepHintLabel', { link = 'ErrorMsg', default = true })
+  -- mep.dap.breakpoints/session/repl also define these three themselves
+  -- (same reasoning as the MepGit*/MepWindowTab* groups above), repeated
+  -- here so they get reapplied on a real `:colorscheme` change too.
+  vim.api.nvim_set_hl(0, 'MepDapBreakpoint', { link = 'DiagnosticError', default = true })
+  vim.api.nvim_set_hl(0, 'MepDapStopped', { link = 'DiagnosticWarn', default = true })
+  vim.api.nvim_set_hl(0, 'MepDapReplTitle', { link = 'Title', default = true })
   -- mep.notify's own severity colors — toast borders/headers and
   -- history-panel entries alike, all keyed by the same four groups so
   -- overriding one recolors both. Linked to Neovim's own Diagnostic*
@@ -87,6 +101,13 @@ local function set_highlights()
   vim.api.nvim_set_hl(0, 'MepOrgTodoKeyword4', { link = 'DiagnosticInfo', default = true })
   vim.api.nvim_set_hl(0, 'MepOrgTodoKeyword5', { link = 'DiagnosticHint', default = true })
   vim.api.nvim_set_hl(0, 'MepOrgTodoKeyword6', { link = 'Type', default = true })
+  -- mep.todoscan.highlight also defines these itself (same reasoning as
+  -- the MepGit*/MepWindowTab* groups above), repeated here so they get
+  -- reapplied on a real `:colorscheme` change too.
+  vim.api.nvim_set_hl(0, 'MepTodoScanTodo', { link = 'DiagnosticWarn', default = true })
+  vim.api.nvim_set_hl(0, 'MepTodoScanFixme', { link = 'DiagnosticError', default = true })
+  vim.api.nvim_set_hl(0, 'MepTodoScanHack', { link = 'DiagnosticInfo', default = true })
+  vim.api.nvim_set_hl(0, 'MepTodoScanNote', { link = 'DiagnosticHint', default = true })
 end
 set_highlights()
 vim.api.nvim_create_autocmd('ColorScheme', {
@@ -110,6 +131,10 @@ vim.api.nvim_create_user_command('MepBuffers', function()
   require('mep.picker').buffers()
 end, { desc = 'mep.nvim: fuzzy-find among open buffers' })
 
+vim.api.nvim_create_user_command('MepCommands', function()
+  require('mep.picker').commands()
+end, { desc = 'mep.nvim: fuzzy-find and run an Ex command' })
+
 vim.api.nvim_create_user_command('MepScratch', function()
   require('mep.scratch').open()
 end, { desc = 'mep.nvim: open the (single, persistent) scratch buffer in the current window' })
@@ -125,6 +150,109 @@ end, { desc = 'mep.nvim: toggle the file tree sidebar' })
 vim.api.nvim_create_user_command('MepFileTreeRefresh', function()
   require('mep.filetree').refresh()
 end, { desc = 'mep.nvim: re-scan the file tree' })
+
+vim.api.nvim_create_user_command('MepSymbolsToggle', function()
+  require('mep.symbols').toggle()
+end, { desc = 'mep.nvim: toggle the LSP symbols outline for the current buffer' })
+
+vim.api.nvim_create_user_command('MepSymbolsRefresh', function()
+  require('mep.symbols').refresh()
+end, { desc = 'mep.nvim: re-request symbols for the open outline' })
+
+vim.api.nvim_create_user_command('MepDapToggleBreakpoint', function()
+  require('mep.dap').breakpoints.toggle(vim.api.nvim_get_current_buf(), vim.api.nvim_win_get_cursor(0)[1])
+end, { desc = 'mep.nvim: toggle a debug breakpoint on the current line' })
+
+vim.api.nvim_create_user_command('MepDapLaunch', function()
+  require('mep.dap').session.launch_interactive()
+end, { desc = 'mep.nvim: start a debug session (prompts for adapter + program)' })
+
+vim.api.nvim_create_user_command('MepDapContinue', function()
+  require('mep.dap').session.continue()
+end, { desc = 'mep.nvim: continue the active debug session' })
+
+vim.api.nvim_create_user_command('MepDapTerminate', function()
+  require('mep.dap').session.terminate()
+end, { desc = 'mep.nvim: terminate the active debug session' })
+
+vim.api.nvim_create_user_command('MepDapSidebar', function()
+  require('mep.dap').sidebar.toggle()
+end, { desc = 'mep.nvim: toggle the debug sidebar (call stack / scopes / breakpoints)' })
+
+vim.api.nvim_create_user_command('MepDapRepl', function()
+  require('mep.dap').repl.toggle()
+end, { desc = 'mep.nvim: toggle the debug console' })
+
+vim.api.nvim_create_user_command('MepDocsGenerate', function()
+  require('mep.docs').generate()
+end, { desc = 'mep.nvim: insert a docstring skeleton for the function on the cursor line' })
+
+vim.api.nvim_create_user_command('MepDocsLookup', function()
+  require('mep.docs').lookup()
+end, { desc = 'mep.nvim: open external documentation for the word under cursor' })
+
+vim.api.nvim_create_user_command('MepFlashcardsReview', function()
+  require('mep.flashcards').review_session()
+end, { desc = 'mep.nvim: start a spaced-repetition review session over config.drill_files' })
+
+vim.api.nvim_create_user_command('MepHelp', function()
+  require('mep.help').picker()
+end, { desc = 'mep.nvim: search commands, keymaps, and library docs' })
+
+vim.api.nvim_create_user_command('MepLeetcode', function()
+  require('mep.leetcode').picker()
+end, { desc = 'mep.nvim: browse local LeetCode problems' })
+
+vim.api.nvim_create_user_command('MepLeetcodeRunTests', function()
+  require('mep.leetcode').run_tests()
+end, { desc = 'mep.nvim: run local sample tests against the current problem file\'s Solution block' })
+
+vim.api.nvim_create_user_command('MepLeetcodeFetch', function()
+  require('mep.leetcode').fetch_interactive()
+end, { desc = 'mep.nvim: fetch a problem (live mode, prompts for its slug) into a new local problem file' })
+
+vim.api.nvim_create_user_command('MepLeetcodeSubmit', function()
+  require('mep.leetcode').submit()
+end, { desc = 'mep.nvim: submit the current problem file\'s Solution block (live mode)' })
+
+vim.api.nvim_create_user_command('MepRoamInsert', function()
+  require('mep.roam').picker()
+end, { desc = 'mep.nvim: search notes, inserting a link to the one chosen' })
+
+vim.api.nvim_create_user_command('MepRoamBacklinks', function()
+  require('mep.roam').toggle_backlinks()
+end, { desc = 'mep.nvim: toggle the backlinks panel for the current note' })
+
+vim.api.nvim_create_user_command('MepRoamToday', function()
+  require('mep.roam').today()
+end, { desc = 'mep.nvim: open (creating if missing) today\'s daily note' })
+
+vim.api.nvim_create_user_command('MepRoamNew', function()
+  require('mep.roam').new_note()
+end, { desc = 'mep.nvim: create a new note (prompts for a title)' })
+
+vim.api.nvim_create_user_command('MepRun', function()
+  require('mep.run').run_current_file()
+end, { desc = 'mep.nvim: run the current file in a terminal split' })
+
+vim.api.nvim_create_user_command('MepReplSendLine', function()
+  require('mep.repl').send_line()
+end, { desc = 'mep.nvim: send the current line to the REPL' })
+
+vim.api.nvim_create_user_command('MepReplSendSelection', function(cmd_opts)
+  require('mep.repl').send_selection(vim.api.nvim_get_current_buf(), cmd_opts.line1, cmd_opts.line2)
+end, {
+  range = true,
+  desc = "mep.nvim: send the given line range to the REPL (usable as :'<,'>MepReplSendSelection)",
+})
+
+vim.api.nvim_create_user_command('MepReplSendBuffer', function()
+  require('mep.repl').send_buffer()
+end, { desc = 'mep.nvim: send the whole buffer to the REPL' })
+
+vim.api.nvim_create_user_command('MepReplJump', function()
+  require('mep.repl').jump_to_repl()
+end, { desc = 'mep.nvim: jump to the REPL window (starting one if needed)' })
 
 vim.api.nvim_create_user_command('MepDashboard', function()
   require('mep.dashboard').open()
@@ -303,6 +431,14 @@ vim.api.nvim_create_user_command('MepAiCancel', function()
     vim.notify('mep.ai: nothing in flight', vim.log.levels.INFO)
   end
 end, { desc = 'mep.nvim: cancel an in-flight mep.ai request (a plain stream or the current agent turn)' })
+
+vim.api.nvim_create_user_command('MepTodoScan', function()
+  require('mep.todoscan').picker()
+end, { desc = 'mep.nvim: search TODO/FIXME/HACK/NOTE comments across the project' })
+
+vim.api.nvim_create_user_command('MepZenToggle', function()
+  require('mep.zen').toggle()
+end, { desc = 'mep.nvim: toggle zen mode (hides chrome/panels, centers the buffer)' })
 
 vim.api.nvim_create_user_command('MepAiSetKey', function(cmd_opts)
   require('mep.ai').set_key(cmd_opts.args ~= '' and cmd_opts.args or nil)

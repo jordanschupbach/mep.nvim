@@ -1,0 +1,43 @@
+local adapters = require('mep.dap.adapters')
+
+describe('mep.dap.adapters', function()
+  describe('registry', function()
+    it('every entry has a non-empty cmd list and filetypes list', function()
+      for name, adapter in pairs(adapters.registry) do
+        assert.is_table(adapter.cmd, name .. ' cmd')
+        assert.is_true(#adapter.cmd > 0, name .. ' cmd is non-empty')
+        assert.is_table(adapter.filetypes, name .. ' filetypes')
+        assert.is_true(#adapter.filetypes > 0, name .. ' filetypes is non-empty')
+      end
+    end)
+
+    it('includes debugpy, delve, and codelldb-equivalent entries (named in the TODO this was built from)', function()
+      assert.is_not_nil(adapters.registry.debugpy)
+      assert.is_not_nil(adapters.registry.delve)
+      assert.is_not_nil(adapters.registry.lldb_dap)
+    end)
+  end)
+
+  describe('names', function()
+    it('returns every registry key, sorted', function()
+      local names = adapters.names()
+      local expected = vim.tbl_keys(adapters.registry)
+      table.sort(expected)
+      assert.are.same(expected, names)
+    end)
+  end)
+
+  describe('for_filetype', function()
+    it('finds the adapter registered for a filetype', function()
+      local name, adapter = adapters.for_filetype('python')
+      assert.are.equal('debugpy', name)
+      assert.are.same(adapters.registry.debugpy, adapter)
+    end)
+
+    it('returns nil for a filetype no entry lists', function()
+      local name, adapter = adapters.for_filetype('brainfuck')
+      assert.is_nil(name)
+      assert.is_nil(adapter)
+    end)
+  end)
+end)

@@ -12,7 +12,7 @@ describe('mep.completion.config', function()
   end)
 
   it('has sensible defaults', function()
-    assert.are.same({ 'lsp', 'buffer', 'path' }, config.defaults.sources)
+    assert.are.same({ 'lsp', 'buffer', 'path', 'snippet' }, config.defaults.sources)
     assert.are.equal(80, config.defaults.debounce_ms)
     assert.are.equal(1, config.defaults.min_chars)
     assert.are.equal(50, config.defaults.max_items)

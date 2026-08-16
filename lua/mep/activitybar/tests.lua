@@ -32,7 +32,7 @@ local current_job = nil
 local function bar_content_width()
   local width = 1
   for _, b in ipairs(config.options.buttons) do
-    width = math.max(width, vim.fn.strdisplaywidth(b.icon or ''))
+    width = math.max(width, vim.fn.strdisplaywidth(config.icon_for(b)))
   end
   return width
 end
@@ -167,9 +167,14 @@ end
 --- header/body in a popup.
 function M.sections()
   local widgets = {
-    { id = '__run__', text = M.running and 'Running...' or 'Run tests', icon = '▶', on_click = function()
-      M.run()
-    end },
+    {
+      id = '__run__',
+      text = M.running and 'Running...' or 'Run tests',
+      icon = require('mep.icons').get_ui_icon('tests'),
+      on_click = function()
+        M.run()
+      end,
+    },
   }
 
   if M.last_result then

@@ -1,0 +1,26 @@
+local langs = require('mep.leetcode.langs')
+
+describe('mep.leetcode.langs', function()
+  describe('leetcode_to_babel', function()
+    it('maps known LeetCode slugs to their babel language key', function()
+      assert.are.equal('python', langs.leetcode_to_babel.python3)
+      assert.are.equal('go', langs.leetcode_to_babel.golang)
+      assert.are.equal('cpp', langs.leetcode_to_babel.cpp)
+    end)
+  end)
+
+  describe('babel_to_leetcode', function()
+    it('is the reverse mapping', function()
+      assert.are.equal('golang', langs.babel_to_leetcode.go)
+      assert.are.equal('cpp', langs.babel_to_leetcode.cpp)
+    end)
+
+    it('prefers python3 over python for the reverse of babel\'s single "python" key', function()
+      assert.are.equal('python3', langs.babel_to_leetcode.python)
+    end)
+
+    it('has no entry for a babel language LeetCode does not offer', function()
+      assert.is_nil(langs.babel_to_leetcode.lua)
+    end)
+  end)
+end)

@@ -18,10 +18,11 @@ describe('mep.completion.completion', function()
   end)
 
   describe('sources', function()
-    it('registers the three built-in sources', function()
+    it('registers the four built-in sources', function()
       assert.is_not_nil(completion.sources.lsp)
       assert.is_not_nil(completion.sources.buffer)
       assert.is_not_nil(completion.sources.path)
+      assert.is_not_nil(completion.sources.snippet)
     end)
 
     it('each has a complete function', function()

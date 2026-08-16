@@ -28,6 +28,7 @@ M.sources = {
   lsp = require('mep.completion.sources.lsp'),
   buffer = require('mep.completion.sources.buffer'),
   path = require('mep.completion.sources.path'),
+  snippet = require('mep.completion.sources.snippet'),
 }
 
 --- Configure mep.completion (see mep.completion.config.defaults for

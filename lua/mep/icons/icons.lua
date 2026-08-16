@@ -54,4 +54,16 @@ function M.get_expand_marker(is_open, opts)
   return is_open and t.expand_marker_open or t.expand_marker_closed
 end
 
+--- A small curated "UI action" icon, by semantic name (`'notifications'`
+--- /`'todo'`/`'tests'`/`'git'`/`'add'`/`'clear'` — see icons/data.lua's
+--- own header comment on `UI_ICONS` for what each traces back to),
+--- styled the same way file/directory icons are. `nil` for an
+--- unrecognized name (callers fall back to their own literal, the same
+--- way `mep.activitybar.config.icon_for` does).
+function M.get_ui_icon(name, opts)
+  opts = opts or {}
+  local t = resolved_table(opts.style or config.options.style)
+  return t.ui_icons and t.ui_icons[name]
+end
+
 return M

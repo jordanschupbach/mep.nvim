@@ -41,12 +41,17 @@ M.defaults = {
   -- buttons" bar this narrow has no room for text anyway. `id` must
   -- match a key mep.activitybar knows how to toggle (`notifications`,
   -- `todo`, `tests`, `git` are built in; see mep.activitybar.activitybar's
-  -- own `panels` table for how to register more).
+  -- own `panels` table for how to register more). No `icon` field here
+  -- — each button's own glyph comes from `require('mep.icons').
+  -- get_ui_icon(id)` (see `M.icon_for` below), respecting
+  -- `mep.icons.setup({ style = ... })` the same way `mep.filetree`
+  -- already does; set one explicitly on a button entry (e.g. `{ id =
+  -- 'notifications', icon = '🔕' }`) to override it regardless of style.
   buttons = {
-    { id = 'notifications', icon = '🔔', label = 'Notifications' },
-    { id = 'todo', icon = '✓', label = 'Todo' },
-    { id = 'tests', icon = '▶', label = 'Tests' },
-    { id = 'git', icon = '⎇', label = 'Git' },
+    { id = 'notifications', label = 'Notifications' },
+    { id = 'todo', label = 'Todo' },
+    { id = 'tests', label = 'Tests' },
+    { id = 'git', label = 'Git' },
   },
   todo = {
     -- Where the todo list is persisted as JSON between sessions. `nil`
@@ -70,6 +75,18 @@ M.options = vim.deepcopy(M.defaults)
 function M.setup(opts)
   M.options = vim.tbl_deep_extend('force', vim.deepcopy(M.defaults), opts or {})
   return M.options
+end
+
+--- A `buttons`-entry's own icon: `button.icon` if it set one explicitly
+--- (a per-button override), else `require('mep.icons').get_ui_icon(
+--- button.id)` — resolved fresh on every call (not cached, and not
+--- baked into `M.defaults`/`M.options` themselves) so a later `mep.
+--- icons.setup({ style = ... })` changes what every already-configured
+--- button renders, the same way `mep.filetree`'s own icons do. Falls
+--- back to an empty string for a button whose `id` isn't one of `mep.
+--- icons`'s own curated UI names and set no explicit `icon` either.
+function M.icon_for(button)
+  return button.icon or require('mep.icons').get_ui_icon(button.id) or ''
 end
 
 return M

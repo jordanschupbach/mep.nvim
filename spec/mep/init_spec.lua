@@ -21,31 +21,67 @@ local chrome_config = require('mep.chrome.config')
 local project_config = require('mep.project.config')
 local ai_config = require('mep.ai.config')
 local scratch_config = require('mep.scratch.config')
+local symbols_config = require('mep.symbols.config')
+local dap_config = require('mep.dap.config')
+local docs_config = require('mep.docs.config')
+local flashcards_config = require('mep.flashcards.config')
+local help_config = require('mep.help.config')
+local colorizer_config = require('mep.colorizer.config')
+local leetcode_config = require('mep.leetcode.config')
+local roam_config = require('mep.roam.config')
+local run_config = require('mep.run.config')
+local repl_config = require('mep.repl.config')
+local snippet_config = require('mep.snippet.config')
+local todoscan_config = require('mep.todoscan.config')
+local zen_config = require('mep.zen.config')
+
+-- Every library's config module, keyed by the same name `mep.setup()`'s
+-- own `opts.<name>` uses — driven by a table (not one named local per
+-- library) specifically so `before_each`/`after_each` below stay at a
+-- constant 2 upvalues each as more libraries are added, rather than
+-- growing by one per library: Lua caps a function at 60 upvalues, and
+-- the previous one-named-local-per-library shape actually hit that
+-- ceiling once this list passed ~28 entries.
+local CONFIG_MODULES = {
+  { name = 'sanity', mod = sanity_config },
+  { name = 'picker', mod = picker_config },
+  { name = 'icons', mod = icons_config },
+  { name = 'filetree', mod = filetree_config },
+  { name = 'dashboard', mod = dashboard_config },
+  { name = 'treesitter', mod = treesitter_config },
+  { name = 'org', mod = org_config },
+  { name = 'whichkey', mod = whichkey_config },
+  { name = 'sidebar', mod = sidebar_config },
+  { name = 'notify', mod = notify_config },
+  { name = 'activitybar', mod = activitybar_config },
+  { name = 'lsp', mod = lsp_config },
+  { name = 'completion', mod = completion_config },
+  { name = 'url', mod = url_config },
+  { name = 'git', mod = git_config },
+  { name = 'window', mod = window_config },
+  { name = 'theme', mod = theme_config },
+  { name = 'chrome', mod = chrome_config },
+  { name = 'project', mod = project_config },
+  { name = 'ai', mod = ai_config },
+  { name = 'scratch', mod = scratch_config },
+  { name = 'symbols', mod = symbols_config },
+  { name = 'dap', mod = dap_config },
+  { name = 'docs', mod = docs_config },
+  { name = 'flashcards', mod = flashcards_config },
+  { name = 'help', mod = help_config },
+  { name = 'colorizer', mod = colorizer_config },
+  { name = 'leetcode', mod = leetcode_config },
+  { name = 'roam', mod = roam_config },
+  { name = 'run', mod = run_config },
+  { name = 'repl', mod = repl_config },
+  { name = 'snippet', mod = snippet_config },
+  { name = 'todoscan', mod = todoscan_config },
+  { name = 'zen', mod = zen_config },
+}
 
 describe('mep (top-level setup fan-out)', function()
-  local saved_leader,
-    saved_localleader,
-    saved_sanity_options,
-    saved_picker_options,
-    saved_icons_options,
-    saved_filetree_options,
-    saved_dashboard_options,
-    saved_treesitter_options,
-    saved_org_options,
-    saved_whichkey_options,
-    saved_sidebar_options,
-    saved_notify_options,
-    saved_activitybar_options,
-    saved_lsp_options,
-    saved_completion_options,
-    saved_url_options,
-    saved_git_options,
-    saved_window_options,
-    saved_theme_options,
-    saved_chrome_options,
-    saved_project_options,
-    saved_ai_options,
-    saved_scratch_options
+  local saved_leader, saved_localleader
+  local saved_options = {}
   local orig_install_all, orig_install
   local orig_notify
   local orig_lsp_config, orig_lsp_enable, orig_diag_config
@@ -54,27 +90,9 @@ describe('mep (top-level setup fan-out)', function()
   before_each(function()
     saved_leader = vim.g.mapleader
     saved_localleader = vim.g.maplocalleader
-    saved_sanity_options = vim.deepcopy(sanity_config.options)
-    saved_picker_options = vim.deepcopy(picker_config.options)
-    saved_icons_options = vim.deepcopy(icons_config.options)
-    saved_filetree_options = vim.deepcopy(filetree_config.options)
-    saved_dashboard_options = vim.deepcopy(dashboard_config.options)
-    saved_treesitter_options = vim.deepcopy(treesitter_config.options)
-    saved_org_options = vim.deepcopy(org_config.options)
-    saved_whichkey_options = vim.deepcopy(whichkey_config.options)
-    saved_sidebar_options = vim.deepcopy(sidebar_config.options)
-    saved_notify_options = vim.deepcopy(notify_config.options)
-    saved_activitybar_options = vim.deepcopy(activitybar_config.options)
-    saved_lsp_options = vim.deepcopy(lsp_config.options)
-    saved_completion_options = vim.deepcopy(completion_config.options)
-    saved_url_options = vim.deepcopy(url_config.options)
-    saved_git_options = vim.deepcopy(git_config.options)
-    saved_window_options = vim.deepcopy(window_config.options)
-    saved_theme_options = vim.deepcopy(theme_config.options)
-    saved_chrome_options = vim.deepcopy(chrome_config.options)
-    saved_project_options = vim.deepcopy(project_config.options)
-    saved_ai_options = vim.deepcopy(ai_config.options)
-    saved_scratch_options = vim.deepcopy(scratch_config.options)
+    for _, entry in ipairs(CONFIG_MODULES) do
+      saved_options[entry.name] = vim.deepcopy(entry.mod.options)
+    end
     orig_notify = vim.notify
 
     -- mep.git.setup()'s default enable=true attaches mep.git.gutter to
@@ -135,30 +153,79 @@ describe('mep (top-level setup fan-out)', function()
     -- way (<leader>gg/<leader>gG by default).
     pcall(vim.keymap.del, 'n', '<leader>gg')
     pcall(vim.keymap.del, 'n', '<leader>gG')
+    -- mep.symbols.setup() binds a real, global toggle keymap the same
+    -- way (<leader>ll by default).
+    pcall(vim.keymap.del, 'n', '<leader>ll')
+    -- mep.dap.setup() binds real, global keymaps for every configured
+    -- action (10 by default, <leader>d*) — mep.dap.keymaps.bind's own
+    -- unconditional global-keymap posture (debugging isn't filetype/
+    -- LSP-attach-gated the way mep.lsp's own keymaps are).
+    for _, lhs_list in pairs(dap_config.defaults.keymaps) do
+      for _, lhs in ipairs(lhs_list) do
+        pcall(vim.keymap.del, 'n', lhs)
+      end
+    end
+    -- mep.docs.setup() binds real, global keymaps the same way
+    -- (<leader>ld/<leader>lD by default).
+    for _, lhs_list in pairs(docs_config.defaults.keymaps) do
+      for _, lhs in ipairs(lhs_list) do
+        pcall(vim.keymap.del, 'n', lhs)
+      end
+    end
+    -- mep.flashcards.setup() binds a real, global keymap the same way
+    -- (<leader>fr by default).
+    for _, lhs_list in pairs(flashcards_config.defaults.keymaps) do
+      for _, lhs in ipairs(lhs_list) do
+        pcall(vim.keymap.del, 'n', lhs)
+      end
+    end
+    -- mep.help.setup() binds a real, global keymap the same way
+    -- (<leader>? by default).
+    for _, lhs_list in pairs(help_config.defaults.keymaps) do
+      for _, lhs in ipairs(lhs_list) do
+        pcall(vim.keymap.del, 'n', lhs)
+      end
+    end
+    -- mep.leetcode.setup() binds a real, global keymap the same way
+    -- (<leader>lc by default).
+    for _, lhs_list in pairs(leetcode_config.defaults.keymaps) do
+      for _, lhs in ipairs(lhs_list) do
+        pcall(vim.keymap.del, 'n', lhs)
+      end
+    end
+    -- mep.roam.setup() binds real, global keymaps the same way
+    -- (<leader>rf/<leader>rb/<leader>rt/<leader>rc by default).
+    for _, lhs_list in pairs(roam_config.defaults.keymaps) do
+      for _, lhs in ipairs(lhs_list) do
+        pcall(vim.keymap.del, 'n', lhs)
+      end
+    end
+    -- mep.run.setup() binds a real, global keymap the same way
+    -- (<leader>xr by default).
+    for _, lhs_list in pairs(run_config.defaults.keymaps) do
+      for _, lhs in ipairs(lhs_list) do
+        pcall(vim.keymap.del, 'n', lhs)
+      end
+    end
+    -- mep.repl.setup() binds real, global keymaps the same way
+    -- (<leader>sl/<leader>ss (visual)/<leader>sb/<leader>sr by
+    -- default) — send_selection is visual-mode, the rest normal.
+    pcall(vim.keymap.del, 'x', '<leader>ss')
+    for _, name in ipairs({ 'send_line', 'send_buffer', 'jump_to_repl' }) do
+      for _, lhs in ipairs(repl_config.defaults.keymaps[name]) do
+        pcall(vim.keymap.del, 'n', lhs)
+      end
+    end
+    -- mep.snippet.setup()'s default tab_keymap=true binds real, global
+    -- insert-mode <Tab>/<S-Tab> keymaps.
+    pcall(vim.keymap.del, 'i', '<Tab>')
+    pcall(vim.keymap.del, 'i', '<S-Tab>')
 
     vim.g.mapleader = saved_leader
     vim.g.maplocalleader = saved_localleader
-    sanity_config.options = saved_sanity_options
-    picker_config.options = saved_picker_options
-    icons_config.options = saved_icons_options
-    filetree_config.options = saved_filetree_options
-    dashboard_config.options = saved_dashboard_options
-    treesitter_config.options = saved_treesitter_options
-    org_config.options = saved_org_options
-    whichkey_config.options = saved_whichkey_options
-    sidebar_config.options = saved_sidebar_options
-    notify_config.options = saved_notify_options
-    activitybar_config.options = saved_activitybar_options
-    lsp_config.options = saved_lsp_options
-    completion_config.options = saved_completion_options
-    url_config.options = saved_url_options
-    git_config.options = saved_git_options
-    window_config.options = saved_window_options
-    theme_config.options = saved_theme_options
-    chrome_config.options = saved_chrome_options
-    project_config.options = saved_project_options
-    ai_config.options = saved_ai_options
-    scratch_config.options = saved_scratch_options
+    for _, entry in ipairs(CONFIG_MODULES) do
+      entry.mod.options = saved_options[entry.name]
+    end
     require('mep.scratch').reset()
     treesitter_install.install_all = orig_install_all
     treesitter_install.install = orig_install
@@ -229,6 +296,40 @@ describe('mep (top-level setup fan-out)', function()
     -- — chrome._reset() is the library's own correct teardown for that
     -- plus statusline/winbar/tabline/statuscolumn/hover/click state.
     require('mep.chrome')._reset()
+    -- mep.dap.setup() itself only binds keymaps, but a test could have
+    -- gone on to actually use the library (launch/toggle breakpoints/
+    -- open the sidebar or console) — reset every stateful submodule the
+    -- same way mep.activitybar/mep.notify/mep.theme/mep.chrome do above.
+    require('mep.dap.session')._reset()
+    require('mep.dap.sidebar')._reset()
+    require('mep.dap.repl')._reset()
+    require('mep.dap.breakpoints').clear_all()
+    -- mep.flashcards.setup() itself only binds a keymap, but a test
+    -- could go on to actually open a review session.
+    require('mep.flashcards.review')._reset()
+    -- mep.roam.setup() itself only binds keymaps, but a test could go
+    -- on to actually open the backlinks panel.
+    require('mep.roam.backlinks')._reset()
+    -- mep.colorizer.setup()'s unconditional enable() attaches to every
+    -- already-loaded buffer (real, global BufEnter/BufReadPost augroup
+    -- plus one augroup/timer per attached buffer) — _reset() is that
+    -- module's own correct teardown for all of it.
+    require('mep.colorizer')._reset()
+    -- mep.repl.setup() registers a real, global TermOpen augroup, and a
+    -- test could go on to actually start a REPL session.
+    require('mep.repl')._reset()
+    -- mep.snippet.setup() itself only binds keymaps, but a test could go
+    -- on to actually expand a snippet, leaving a session active.
+    require('mep.snippet.session')._reset()
+    require('mep.snippet.registry')._reset()
+    -- mep.todoscan.setup()'s default highlight=true attaches to every
+    -- already-loaded buffer (real, global BufEnter/BufReadPost augroup
+    -- plus one augroup/timer per attached buffer) — _reset() is that
+    -- submodule's own correct teardown for all of it.
+    require('mep.todoscan.highlight')._reset()
+    -- mep.zen.setup() itself only stores config, but a test could go on
+    -- to actually toggle zen mode.
+    require('mep.zen')._reset()
   end)
 
   it('setup({}) applies each library\'s defaults', function()
@@ -318,7 +419,7 @@ describe('mep (top-level setup fan-out)', function()
   it('forwards opts.completion to mep.completion.setup, deep-merged', function()
     mep.setup({ completion = { min_chars = 3 } })
     assert.are.equal(3, completion_config.options.min_chars)
-    assert.are.same({ 'lsp', 'buffer', 'path' }, completion_config.options.sources) -- untouched
+    assert.are.same({ 'lsp', 'buffer', 'path', 'snippet' }, completion_config.options.sources) -- untouched
   end)
 
   it('forwards opts.url to mep.url.setup, deep-merged', function()

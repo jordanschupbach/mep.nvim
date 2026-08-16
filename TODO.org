@@ -1,17 +1,15 @@
-* TODO Add hints 
-* TODO Command picker
-* TODO Dap plugin support
-* TODO Docs support
-* TODO Filetree add/delete support
-* TODO Flash cards
-* TODO Help system
-* TODO Highlight colors support
-* TODO Leetcode
-* TODO Markdown support
-* TODO Org-roam plugin support
-* TODO Play button
-* TODO Repl support
-* TODO Snippet management
-* TODO TODOs
-* TODO Use mep.icons in the sidebar/activitybar buttons (currently hardcoded emoji)
-* TODO zen mode
+* TODO Update git gutter to use | symbol instead of +,-,~ for changes, just relying on the colors to indicate.
+* TODO Add inline diagnostics text
+ - Use a filled in circle for each one colored by type at the end of the line and allow for expansion, one on each line.
+* TODO add inline annotation at end of org mode blocks giving status of lsp and any other relevant org babel info (e.g. whether code has been run and cached, (and cached location)).
+* TODO Add <leader>zz binding to toggle zen mode
+* TODO Add <leader>db binding to toggle dap break point
+* TODO Use filled in red circle as symbol in gutter for indicating debug break point
+* TODO Add dap-UI like toggleable buffers (all toggled at once on left and bottom sides).
+* TODO Add all set bindings and all default bindings to which key
+  - This may require adding a wrapper method for setting key bindings that register them to which key?
+* TODO Add picker for snippets and bind to <leader>yy and add a bunch of per-language snippets.
+* TODO Add org-ref like functionality, defaulting to looking in the current (project) buffer for a .bib file for entries, and then, if not found, the current buffer's directory, and then looking for any .bib files in the project root directory (current directory). Add picker for injecting references in org mode (set binding to trigger picker with <localleader>ir and set <localleader> to ',')
+* TODO Add test sidebar functionality for running and viewing all tests in a project. Set up for this project (i.e. busted lua), but allow for configurable extensions to other languages that may have various testing frameworks that may be used within a project
+* TODO Add buttons to right side of tab bar for toggling sidebars for tests, notifications, git, filetree, and file structure. Add appropriate 
+* TODO Setup clipboard to use system clipboard in a platform agnostic way

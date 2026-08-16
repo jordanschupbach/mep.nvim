@@ -70,4 +70,14 @@ function M.define_code_blocks()
   vim.api.nvim_set_hl(0, 'MepMarkdownCodeBlock', { link = 'CursorLine', default = true })
 end
 
+--- (Re)define `MepMarkdownFrontmatter`, the background band `mep.
+--- markdown.frontmatter` paints behind a YAML/TOML front-matter block —
+--- linked to `ColorColumn` (a real, standard "subtle marker background"
+--- group every theme already defines, distinct from `CursorLine` above
+--- so a front-matter block and a code block don't read identically).
+--- `default = true`, same reasoning as `define_headers`.
+function M.define_frontmatter()
+  vim.api.nvim_set_hl(0, 'MepMarkdownFrontmatter', { link = 'ColorColumn', default = true })
+end
+
 return M

@@ -23,10 +23,14 @@
 --- replacement range, not the item's own (possibly different)
 --- `textEdit` range — adequate for the common case, not a full LSP
 --- `textEdit` implementation. Snippet-shaped `insertText` (`$1`/`$0`
---- placeholders, when the item's `insertTextFormat` is `Snippet`) is
---- inserted as literal text, not expanded — this project has no snippet
---- engine of its own.
+--- placeholders, when the item's `insertTextFormat` is `2`, LSP's
+--- `InsertTextFormat.Snippet`) rides along as a `user_data` marker (see
+--- `mep.completion.engine.encode_snippet_user_data`) and is expanded
+--- through `mep.snippet` once accepted — see that module's own
+--- `CompleteDone` handling.
 local M = {}
+
+local INSERT_TEXT_FORMAT_SNIPPET = 2
 
 local KIND_NAMES = {
   [1] = 'Text',
@@ -101,12 +105,18 @@ function M.complete(ctx, callback)
       remaining = remaining - 1
       local raw = (result and (result.items or result)) or {}
       for _, item in ipairs(raw) do
+        local word = item.insertText or item.label
+        local user_data = ''
+        if item.insertTextFormat == INSERT_TEXT_FORMAT_SNIPPET then
+          user_data = require('mep.completion.engine').encode_snippet_user_data(word)
+        end
         collected[#collected + 1] = {
-          word = item.insertText or item.label,
+          word = word,
           abbr = item.label,
           kind = KIND_NAMES[item.kind] or 'Text',
           menu = '[' .. client.name .. ']',
           info = item.detail or '',
+          user_data = user_data,
         }
       end
       if remaining == 0 then

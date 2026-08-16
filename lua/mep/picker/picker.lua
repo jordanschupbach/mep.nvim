@@ -52,4 +52,11 @@ function M.buffers(opts)
   M.start(require('mep.picker.sources.buffers').picker_opts(opts))
 end
 
+--- Command picker: fuzzy-find every user-defined Ex command (buffer-local
+--- and global merged, this project's own `:Mep*` commands included).
+--- `<CR>` runs it, prompting for argument text first if it takes any.
+function M.commands(opts)
+  M.start(require('mep.picker.sources.commands').picker_opts(opts))
+end
+
 return M

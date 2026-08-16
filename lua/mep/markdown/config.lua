@@ -31,12 +31,40 @@ M.defaults = {
   -- read as a distinct block instead of blending into surrounding
   -- prose.
   code_blocks = true,
+  -- GFM task-list checkbox toggling under the cursor
+  -- (mep.markdown.checkbox), mirroring mep.org's own checkbox handling.
+  checkbox = true,
+  -- ATX-heading-depth folding (mep.markdown.fold), mirroring
+  -- mep.org.fold.
+  fold = true,
+  -- Conceals raw link/emphasis syntax, showing only the rendered text
+  -- (mep.markdown.linkconceal), mirroring mep.org.linkconceal. Sets
+  -- 'conceallevel'/'concealcursor' on windows showing an activated
+  -- markdown buffer.
+  conceal = true,
+  -- Recognizes and distinctly highlights a YAML (---)/TOML (+++)
+  -- front-matter block at the top of the file (mep.markdown.
+  -- frontmatter).
+  frontmatter = true,
+  keymaps = {
+    -- Toggle the checkbox under the cursor — real org-mode's/this
+    -- project's own <C-c><C-c> convention, free to reuse here since
+    -- mep.markdown has no babel-execute dual purpose to disambiguate
+    -- from the way mep.org's own <C-c><C-c> does.
+    toggle_checkbox = { '<C-c><C-c>' },
+    toggle_fold = { '<Tab>' },
+  },
 }
 
-M.options = vim.deepcopy(M.defaults)
+local keys = require('mep.core.keys')
+
+-- Expanded through mep.core.keys so `<Mod1-...>` placeholders (in the
+-- defaults and in user-supplied keymaps alike) become the concrete
+-- per-platform modifier — see mep.config.defaults.mods.
+M.options = keys.expand_table(vim.deepcopy(M.defaults))
 
 function M.setup(opts)
-  M.options = vim.tbl_deep_extend('force', vim.deepcopy(M.defaults), opts or {})
+  M.options = keys.expand_table(vim.tbl_deep_extend('force', vim.deepcopy(M.defaults), opts or {}))
   return M.options
 end
 

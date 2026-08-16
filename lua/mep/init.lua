@@ -4,7 +4,10 @@
 --- `mep.filetree`, `mep.treesitter`, `mep.org`, `mep.markdown`, `mep.picker`,
 --- `mep.whichkey`, `mep.sidebar`, `mep.notify`, `mep.activitybar`,
 --- `mep.lsp`, `mep.completion`, `mep.url`, `mep.git`, `mep.window`,
---- `mep.theme`, `mep.chrome`, `mep.project`, `mep.ai`, `mep.scratch`);
+--- `mep.theme`, `mep.chrome`, `mep.project`, `mep.ai`, `mep.scratch`,
+--- `mep.symbols`, `mep.hints`, `mep.dap`, `mep.docs`, `mep.flashcards`,
+--- `mep.help`, `mep.colorizer`, `mep.leetcode`, `mep.roam`, `mep.run`,
+--- `mep.repl`, `mep.snippet`, `mep.todoscan`, `mep.zen`);
 --- libraries can equally be required and configured directly, e.g.
 --- `require('mep.picker').setup({ ... })`.
 local M = {}
@@ -51,7 +54,58 @@ local M = {}
 -- (whose only side effect is binding its own keymaps), so it's simply
 -- added last. `scratch` has no ordering dependency either — `open()`
 -- creates its buffer lazily on first call, not at `setup()` time, so
--- it's simply added at the end too. `theme` is listed right
+-- it's simply added at the end too. `symbols` has no ordering
+-- dependency either — its own `setup()` only ever binds its own
+-- trigger keymap and reads its own config at `open()` time, so it's
+-- simply added at the end too. `hints` has no ordering dependency
+-- either — its own `setup()` only ever binds its own trigger keymaps
+-- and reads its own config at trigger time, so it's simply added at
+-- the end too. `dap` has no ordering dependency either — its own
+-- `setup()` only ever binds its own global keymaps and reads its own
+-- config at session-start time, so it's simply added at the end too.
+-- `docs` has no ordering dependency either — its own `setup()` only
+-- ever binds its own global keymaps and reads its own config at press
+-- time, so it's simply added at the end too. `flashcards` has no
+-- ordering dependency either — it reads `mep.org.property`/`tags`/
+-- `outline`/`headline`/`plan`/`agenda` directly wherever it needs them
+-- (pure parsing functions, not gated on `mep.org.setup()` having run),
+-- and its own `setup()` only binds its own global keymap, so it's
+-- simply added at the end too. `help` has no ordering dependency
+-- either — it reads `mep.picker`/`mep.whichkey` directly wherever it
+-- needs them (only at picker-open time, not `setup()` time), so it's
+-- simply added at the end too. `colorizer` has no ordering dependency
+-- either — its own `enable()` (called from `setup()`) only attaches to
+-- already-loaded buffers and future ones via its own global augroup, no
+-- dependency on any other library's setup having run first, so it's
+-- simply added at the end too. `leetcode` has no ordering dependency
+-- either — it reads `mep.org.babel`/`mep.picker`/`mep.core` directly
+-- wherever it needs them (only at run-tests/fetch/submit/picker-open
+-- time, not `setup()` time), so it's simply added at the end too.
+-- `roam` has no ordering dependency either — it reads `mep.org.id`/
+-- `link`/`headline`/`outline`/`capture`/`mep.picker`/`mep.sidebar`
+-- directly wherever it needs them (only at picker-open/panel-open/
+-- daily-note/new-note time, not `setup()` time), so it's simply added
+-- at the end too. `run` has no ordering dependency either — it reads
+-- `mep.org.babel` directly wherever it needs it (only at run-current-
+-- file time, not `setup()` time), so it's simply added at the end too.
+-- `repl` has no ordering dependency either — its own `setup()` only
+-- binds its own keymaps and a `TermOpen` autocmd, no dependency on any
+-- other library's setup having run first, so it's simply added at the
+-- end too. `snippet` has no ordering dependency either — its own
+-- `setup()` only binds its own `<Tab>`/`<S-Tab>` keymaps, and `mep.
+-- completion`'s own soft dependency on it (its `snippet` source, and
+-- the snippet-shaped-`insertText` branch of its `lsp` source) is
+-- resolved lazily via `require` at completion time, not `setup()`
+-- time, so it's simply added at the end too. `todoscan` has no ordering
+-- dependency either — its own `setup()` only ever attaches its live
+-- highlighting to already-loaded buffers and future ones via its own
+-- global augroup, no dependency on any other library's setup having run
+-- first, so it's simply added at the end too. `zen` has no ordering
+-- dependency either — its own `setup()` only ever stores config, doing
+-- nothing at all until `toggle()`/`enable()` is actually called (each
+-- of `mep.activitybar`/`mep.filetree`/`mep.symbols`/`mep.chrome` is
+-- `require`d lazily then, softly — not depended on at `setup()` time),
+-- so it's simply added at the end too. `theme` is listed right
 -- after `sanity`,
 -- deliberately, for two reasons that both point the same direction:
 -- its own setup() (which applies a colorscheme by default,
@@ -87,6 +141,20 @@ local CONFIGURABLE_LIBRARIES = {
   'project',
   'ai',
   'scratch',
+  'symbols',
+  'hints',
+  'dap',
+  'docs',
+  'flashcards',
+  'help',
+  'colorizer',
+  'leetcode',
+  'roam',
+  'run',
+  'repl',
+  'snippet',
+  'todoscan',
+  'zen',
 }
 
 --- opts: `{ theme = {...}, sanity = {...}, dashboard = {...}, icons =
@@ -95,7 +163,11 @@ local CONFIGURABLE_LIBRARIES = {
 --- {...}, whichkey = {...}, sidebar = {...}, notify = {...}, activitybar
 --- = {...}, lsp =
 --- {...}, completion = {...}, url = {...}, git = {...}, window = {...},
---- chrome = {...}, project = {...}, ai = {...}, scratch = {...} }` (all optional). Each sub-table is
+--- chrome = {...}, project = {...}, ai = {...}, scratch = {...}, symbols
+--- = {...}, hints = {...}, dap = {...}, docs = {...}, flashcards =
+--- {...}, help = {...}, colorizer = {...}, leetcode = {...}, roam =
+--- {...}, run = {...}, repl = {...}, snippet = {...}, todoscan = {...},
+--- zen = {...} }` (all optional). Each sub-table is
 --- forwarded to that library's own `setup()`; see `mep.<name>.config.
 --- defaults` for each library's shape. Note: mep.treesitter's default
 --- `ensure_installed = true` means this can kick off background
@@ -147,6 +219,20 @@ local LAZY_LIBRARIES = {
   project = true,
   ai = true,
   scratch = true,
+  symbols = true,
+  hints = true,
+  dap = true,
+  docs = true,
+  flashcards = true,
+  help = true,
+  colorizer = true,
+  leetcode = true,
+  roam = true,
+  run = true,
+  repl = true,
+  snippet = true,
+  todoscan = true,
+  zen = true,
   version = true,
 }
 

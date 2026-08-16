@@ -9,6 +9,7 @@ local highlights = require('mep.markdown.highlights')
 local gutter = require('mep.markdown.gutter')
 local tables = require('mep.markdown.tables')
 local codeblocks = require('mep.markdown.codeblocks')
+local frontmatter = require('mep.markdown.frontmatter')
 local ts_install = require('mep.treesitter.install')
 local ts_activate = require('mep.treesitter.activate')
 
@@ -50,11 +51,15 @@ describe('mep.markdown.markdown', function()
     assert.is_false(opts.headers)
   end)
 
-  it('exposes the highlights, gutter, tables, and codeblocks submodules', function()
+  it('exposes the highlights, gutter, tables, codeblocks, checkbox, fold, linkconceal, and frontmatter submodules', function()
     assert.are.equal(highlights, markdown.highlights)
     assert.are.equal(gutter, markdown.gutter)
     assert.are.equal(tables, markdown.tables)
     assert.are.equal(codeblocks, markdown.codeblocks)
+    assert.are.equal(require('mep.markdown.checkbox'), markdown.checkbox)
+    assert.are.equal(require('mep.markdown.fold'), markdown.fold)
+    assert.are.equal(require('mep.markdown.linkconceal'), markdown.linkconceal)
+    assert.are.equal(frontmatter, markdown.frontmatter)
   end)
 
   describe('highlighting', function()
@@ -248,6 +253,119 @@ describe('mep.markdown.markdown', function()
       vim.bo[buf].filetype = 'markdown'
 
       assert.is_false(codeblocks.is_attached(buf))
+    end)
+  end)
+
+  describe('frontmatter', function()
+    it('attaches frontmatter for buffers opened after setup() when frontmatter = true', function()
+      stub_install()
+      markdown.setup({ frontmatter = true, gutter = false, tables = false, code_blocks = false, highlight = false })
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.bo[buf].filetype = 'markdown'
+
+      assert.is_true(frontmatter.is_attached(buf))
+    end)
+
+    it('does not attach frontmatter when frontmatter = false', function()
+      stub_install()
+      markdown.setup({ frontmatter = false, gutter = false, tables = false, code_blocks = false, highlight = false })
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.bo[buf].filetype = 'markdown'
+
+      assert.is_false(frontmatter.is_attached(buf))
+    end)
+
+    it('defines MepMarkdownFrontmatter on setup', function()
+      stub_install()
+      vim.cmd('highlight clear')
+      markdown.setup({ gutter = false, tables = false, code_blocks = false, highlight = false })
+      assert.are.equal('ColorColumn', vim.api.nvim_get_hl(0, { name = 'MepMarkdownFrontmatter' }).link)
+    end)
+  end)
+
+  describe('checkbox keymap', function()
+    it('binds toggle_checkbox buffer-locally when checkbox = true', function()
+      stub_install()
+      markdown.setup({ checkbox = true, gutter = false, tables = false, code_blocks = false, highlight = false, fold = false, conceal = false })
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '- [ ] task' })
+      vim.bo[buf].filetype = 'markdown'
+
+      local map = vim.api.nvim_buf_call(buf, function()
+        return vim.fn.maparg('<C-c><C-c>', 'n', false, true)
+      end)
+      assert.is_not_nil(next(map))
+      assert.are.equal(1, map.buffer)
+    end)
+
+    it('does not bind toggle_checkbox when checkbox = false', function()
+      stub_install()
+      markdown.setup({ checkbox = false, gutter = false, tables = false, code_blocks = false, highlight = false, fold = false, conceal = false })
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.bo[buf].filetype = 'markdown'
+
+      local map = vim.api.nvim_buf_call(buf, function()
+        return vim.fn.maparg('<C-c><C-c>', 'n', false, true)
+      end)
+      assert.is_nil(next(map))
+    end)
+  end)
+
+  describe('fold', function()
+    it('sets foldmethod=expr on windows showing the buffer when fold = true', function()
+      stub_install()
+      local buf = vim.api.nvim_create_buf(false, true)
+      local win = vim.api.nvim_open_win(buf, true, { relative = 'editor', row = 0, col = 0, width = 20, height = 5 })
+      vim.bo[buf].filetype = 'markdown'
+
+      markdown.setup({ fold = true, gutter = false, tables = false, code_blocks = false, highlight = false, conceal = false })
+      vim.bo[buf].filetype = 'markdown' -- re-trigger FileType now that setup() has registered the autocmd
+
+      assert.are.equal('expr', vim.wo[win].foldmethod)
+      vim.api.nvim_win_close(win, true)
+    end)
+
+    it('resets foldmethod to manual when fold = false', function()
+      stub_install()
+      local buf = vim.api.nvim_create_buf(false, true)
+      local win = vim.api.nvim_open_win(buf, true, { relative = 'editor', row = 0, col = 0, width = 20, height = 5 })
+      vim.wo[win].foldmethod = 'expr'
+      vim.bo[buf].filetype = 'markdown'
+
+      markdown.setup({ fold = false, gutter = false, tables = false, code_blocks = false, highlight = false, conceal = false })
+      vim.bo[buf].filetype = 'markdown'
+
+      assert.are.equal('manual', vim.wo[win].foldmethod)
+      vim.api.nvim_win_close(win, true)
+    end)
+  end)
+
+  describe('conceal', function()
+    it('sets conceallevel/concealcursor on windows showing the buffer when conceal = true', function()
+      stub_install()
+      local buf = vim.api.nvim_create_buf(false, true)
+      local win = vim.api.nvim_open_win(buf, true, { relative = 'editor', row = 0, col = 0, width = 20, height = 5 })
+      vim.bo[buf].filetype = 'markdown'
+
+      markdown.setup({ conceal = true, gutter = false, tables = false, code_blocks = false, highlight = false, fold = false })
+      vim.bo[buf].filetype = 'markdown'
+
+      assert.are.equal(2, vim.wo[win].conceallevel)
+      assert.are.equal('nc', vim.wo[win].concealcursor)
+      vim.api.nvim_win_close(win, true)
+    end)
+
+    it('does not touch conceallevel when conceal = false', function()
+      stub_install()
+      local buf = vim.api.nvim_create_buf(false, true)
+      local win = vim.api.nvim_open_win(buf, true, { relative = 'editor', row = 0, col = 0, width = 20, height = 5 })
+      vim.bo[buf].filetype = 'markdown'
+
+      markdown.setup({ conceal = false, gutter = false, tables = false, code_blocks = false, highlight = false, fold = false })
+      vim.bo[buf].filetype = 'markdown'
+
+      assert.are.equal(0, vim.wo[win].conceallevel)
+      vim.api.nvim_win_close(win, true)
     end)
   end)
 end)

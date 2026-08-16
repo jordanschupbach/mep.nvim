@@ -153,6 +153,15 @@ describe('mep.activitybar.tests', function()
       assert.are.equal('Run tests', widgets[1].text)
     end)
 
+    it('sources the "Run tests" icon from mep.icons (respects style)', function()
+      local icons_config = require('mep.icons.config')
+      local saved_icons_options = vim.deepcopy(icons_config.options)
+      assert.are.equal('▶', tests_mod.sections()[1].widgets[1].icon)
+      icons_config.setup({ style = 'ascii' })
+      assert.are.equal('>', tests_mod.sections()[1].widgets[1].icon)
+      icons_config.options = saved_icons_options
+    end)
+
     it('shows the summary and one widget per failure after a run', function()
       tests_mod.last_result = tests_mod.parse_output(table.concat({
         '1 success / 1 failure / 0 errors / 0 pending : 0.01 seconds',

@@ -18,7 +18,7 @@ local loaded = false
 local function bar_content_width()
   local width = 1
   for _, b in ipairs(config.options.buttons) do
-    width = math.max(width, vim.fn.strdisplaywidth(b.icon or ''))
+    width = math.max(width, vim.fn.strdisplaywidth(config.icon_for(b)))
   end
   return width
 end
@@ -140,8 +140,9 @@ end
 --- clicking toggles it).
 function M.sections()
   ensure_loaded()
+  local icons = require('mep.icons')
   local widgets = {
-    { id = '__add__', text = 'Add todo...', icon = '+', on_click = function()
+    { id = '__add__', text = 'Add todo...', icon = icons.get_ui_icon('add'), on_click = function()
       M.add_interactive()
     end },
   }
@@ -152,7 +153,7 @@ function M.sections()
     end
   end
   if any_done then
-    widgets[#widgets + 1] = { id = '__clear_done__', text = 'Clear done', icon = '🗑', on_click = function()
+    widgets[#widgets + 1] = { id = '__clear_done__', text = 'Clear done', icon = icons.get_ui_icon('clear'), on_click = function()
       M.clear_done()
     end }
   end

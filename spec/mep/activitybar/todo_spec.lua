@@ -117,11 +117,31 @@ describe('mep.activitybar.todo', function()
       assert.are.equal('Add todo...', widgets[1].text)
     end)
 
+    it('sources the "Add todo..." icon from mep.icons (respects style)', function()
+      local icons_config = require('mep.icons.config')
+      local saved_icons_options = vim.deepcopy(icons_config.options)
+      assert.are.equal('+', todo.sections()[1].widgets[1].icon)
+      icons_config.setup({ style = 'ascii' })
+      assert.are.equal('+', todo.sections()[1].widgets[1].icon)
+      icons_config.options = saved_icons_options
+    end)
+
     it('only shows "Clear done" once something is done', function()
       todo.add('a')
       assert.are.equal('a', todo.sections()[1].widgets[2].text)
       todo.toggle_done(todo.items[1].id)
       assert.are.equal('Clear done', todo.sections()[1].widgets[2].text)
+    end)
+
+    it('sources the "Clear done" icon from mep.icons (respects style)', function()
+      local icons_config = require('mep.icons.config')
+      local saved_icons_options = vim.deepcopy(icons_config.options)
+      todo.add('a')
+      todo.toggle_done(todo.items[1].id)
+      assert.are.equal('🗑', todo.sections()[1].widgets[2].icon)
+      icons_config.setup({ style = 'ascii' })
+      assert.are.equal('x', todo.sections()[1].widgets[2].icon)
+      icons_config.options = saved_icons_options
     end)
 
     it('renders a checkbox icon reflecting done state', function()

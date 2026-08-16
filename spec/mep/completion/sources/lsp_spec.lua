@@ -111,6 +111,33 @@ describe('mep.completion.sources.lsp', function()
     assert.are.same({ 'a', 'b' }, words)
   end)
 
+  it('leaves user_data empty for a plain-text item', function()
+    vim.lsp.get_clients = function()
+      return { make_client('lua_ls', 1, function(handler)
+        handler(nil, { { label = 'print', insertTextFormat = 1 } })
+      end) }
+    end
+    local result
+    lsp_source.complete(ctx(), function(items)
+      result = items
+    end)
+    assert.are.equal('', result[1].user_data)
+  end)
+
+  it('carries a snippet-shaped insertText (insertTextFormat = 2) as user_data', function()
+    vim.lsp.get_clients = function()
+      return { make_client('lua_ls', 1, function(handler)
+        handler(nil, { { label = 'fn', insertText = 'function $1($2)\n\t$0\nend', insertTextFormat = 2 } })
+      end) }
+    end
+    local result
+    lsp_source.complete(ctx(), function(items)
+      result = items
+    end)
+    local engine = require('mep.completion.engine')
+    assert.are.equal('function $1($2)\n\t$0\nend', engine._decode_snippet_user_data(result[1].user_data))
+  end)
+
   it('handles a nil result (server returned no completions) without erroring', function()
     vim.lsp.get_clients = function()
       return { make_client('lua_ls', 1, function(handler)

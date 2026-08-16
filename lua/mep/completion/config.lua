@@ -5,7 +5,7 @@ M.defaults = {
   -- query, in priority order — first-listed wins on a duplicate `word`
   -- across sources. An unrecognized name is skipped with a warning at
   -- setup() time, not a hard error.
-  sources = { 'lsp', 'buffer', 'path' },
+  sources = { 'lsp', 'buffer', 'path', 'snippet' },
   -- How long to wait, after the buffer stops changing, before querying
   -- sources — mep.picker's own dynamic-source debounce idea, applied
   -- here.

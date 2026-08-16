@@ -32,6 +32,18 @@ describe('mep.activitybar.activitybar', function()
       assert.are.same({ '🔔', '✓', '▶', '⎇' }, vim.api.nvim_buf_get_lines(activitybar.bar().buf, 0, -1, false))
     end)
 
+    it('respects mep.icons.setup({ style = ... }) for the default button set', function()
+      local icons_config = require('mep.icons.config')
+      local saved_icons_options = vim.deepcopy(icons_config.options)
+      icons_config.setup({ style = 'ascii' })
+
+      activitybar.bar().opts.animate = false
+      activitybar.bar():open()
+      assert.are.same({ '!', 'v', '>', 'b' }, vim.api.nvim_buf_get_lines(activitybar.bar().buf, 0, -1, false))
+
+      icons_config.options = saved_icons_options
+    end)
+
     it('does not steal focus on open (e.g. from mep.dashboard, also auto-opened on VimEnter)', function()
       activitybar.bar().opts.animate = false
       local before = vim.api.nvim_get_current_win()

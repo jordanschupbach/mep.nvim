@@ -48,7 +48,7 @@ local autocmd_group = nil
 local function bar_content_width()
   local width = 1
   for _, b in ipairs(config.options.buttons) do
-    width = math.max(width, vim.fn.strdisplaywidth(b.icon or ''))
+    width = math.max(width, vim.fn.strdisplaywidth(config.icon_for(b)))
   end
   return width
 end
@@ -59,7 +59,7 @@ local function build_bar_sections()
     widgets[#widgets + 1] = {
       id = b.id,
       text = '', -- icon-only — see mep.activitybar.config.defaults.buttons
-      icon = b.icon,
+      icon = config.icon_for(b),
       tooltip = b.label,
       on_click = function()
         M.toggle_panel(b.id)

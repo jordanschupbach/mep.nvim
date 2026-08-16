@@ -1,341 +1,1203 @@
-*mep.txt*    Zero-dependency library plugin: core, sanity, dashboard, icons,
-             filetree, treesitter, org, picker
+*mep.txt*   A zero-dependency, modular collection of Neovim Lua libraries
 
 ==============================================================================
-CONTENTS                                                       *mep-contents*
+mep.nvim                                                                 *mep*
 
-    1. Introduction ........................ |mep-introduction|
-    2. Setup ................................ |mep-setup|
-    3. Commands ............................. |mep-commands|
-    4. Core library .......................... |mep.core|
-    5. Sanity library ........................ |mep.sanity|
-    6. Dashboard library ..................... |mep.dashboard|
-    7. Icons library ......................... |mep.icons|
-    8. Filetree library ...................... |mep.filetree|
-    9. Treesitter library .................... |mep.treesitter|
-   10. Org library ........................... |mep.org|
-   11. Picker library ........................ |mep.picker|
+A zero-dependency Neovim plugin/distribution using a modular architecture
+of a collection of independent Lua libraries under one repo. No
+`plenary`, no `telescope`, no external Lua deps — only Neovim's built-in
+APIs plus, where a library chooses to shell out, standard CLI tools
+(currently: `rg`, optionally `git` + a C compiler for |mep-treesitter|'s
+parser installer, and `curl` for |mep-ai|'s own LLM streaming — only
+needed if you actually use that library).
 
-==============================================================================
-1. Introduction                                            *mep-introduction*
-
-mep.nvim is a zero-dependency collection of Neovim Lua libraries, structured
-like mini.nvim: one repo, many independent modules under |mep|. It depends
-on nothing but Neovim itself, plus optionally: `rg` (mep.picker), and `git` +
-a C compiler (mep.treesitter's parser installer, also used by mep.org for
-the `org` parser).
-
-Each library lives at lua/mep/<name>/ with an aggregator entry file of the
-same name (<name>/<name>.lua) and a thin init.lua alias, so both
+Each library lives at `lua/mep/<name>/` with an aggregator entry file of
+the same name that aggregates the pieces implemented in sibling files —
+e.g. `lua/mep/core/core.lua` aggregates `coroutines.lua`, `job.lua`,
+`parallel.lua`, `util.lua`. A thin `init.lua` shim in each directory just
+does `return require('mep.<name>.<name>')`, so both
 `require('mep.<name>')` and `require('mep.<name>.<name>')` work. Nothing
-applies just from requiring a library — only calling its `setup()` has
-effect.
+has a side effect just from being `require`d — behavior only happens once
+a library's `setup()` is called (or, for |mep-picker|, when one of its
+picker functions is invoked directly).
+
+                                      Type |gO| to see the table of contents.
 
 ==============================================================================
-2. Setup                                                         *mep-setup*
+CONTENTS                                                        *mep-contents*
 
-`require('mep').setup(opts)` is optional; every library works with sensible
-defaults if it's never called. `opts.<name>` is forwarded to
-`mep.<name>.setup()`: >
+  Requirements .............................................|mep-requirements|
+  Setup ...........................................................|mep-setup|
+  Global modifier keys ....................................|mep-modifier-keys|
+  mep.core .........................................................|mep-core|
+  mep.sanity .....................................................|mep-sanity|
+  mep.theme .......................................................|mep-theme|
+  mep.dashboard ...............................................|mep-dashboard|
+  mep.icons .......................................................|mep-icons|
+  mep.filetree .................................................|mep-filetree|
+  mep.treesitter .............................................|mep-treesitter|
+  mep.org ...........................................................|mep-org|
+  mep.markdown .................................................|mep-markdown|
+  mep.picker .....................................................|mep-picker|
+  mep.whichkey .................................................|mep-whichkey|
+  mep.sidebar ...................................................|mep-sidebar|
+  mep.notify .....................................................|mep-notify|
+  mep.activitybar ...........................................|mep-activitybar|
+  mep.lsp ...........................................................|mep-lsp|
+  mep.completion .............................................|mep-completion|
+  mep.url ...........................................................|mep-url|
+  mep.git ...........................................................|mep-git|
+  mep.window .....................................................|mep-window|
+  mep.chrome .....................................................|mep-chrome|
+  mep.project ...................................................|mep-project|
+  mep.ai .............................................................|mep-ai|
+  mep.scratch ...................................................|mep-scratch|
+  mep.symbols ...................................................|mep-symbols|
+  mep.hints .......................................................|mep-hints|
+  mep.dap ...........................................................|mep-dap|
+  mep.docs .........................................................|mep-docs|
+  mep.flashcards .............................................|mep-flashcards|
+  Building your own picker ................................|mep-custom-picker|
+  Development ...............................................|mep-development|
+
+==============================================================================
+REQUIREMENTS                                                *mep-requirements*
+
+- Neovim >= 0.9 (|mep-lsp| specifically needs >= 0.11 — `vim.lsp.config`/
+  `vim.lsp.enable` — and warns and no-ops on anything older rather than
+  erroring).
+- `rg` (ripgrep) on `PATH` for `:MepLiveGrep`. `:MepFindFiles` uses `rg`
+  too when present (faster, respects `.gitignore`) and otherwise falls
+  back to a synchronous directory walk.
+- `git` and a C compiler (`cc`/`gcc`/`clang`) on `PATH` for
+  |mep-treesitter|'s parser installer. Not required for treesitter
+  "activation", which only uses parsers already available.
+- `curl` on `PATH` for |mep-ai|'s LLM streaming, only if you use it.
+
+==============================================================================
+SETUP                                                              *mep-setup*
+
+`require('mep').setup(opts)` is optional — every library works with its
+own defaults if you never call it — but it's how you configure more than
+one library at once: `opts.<name>` is forwarded to `mep.<name>.setup()`.
+>lua
     require('mep').setup({
+      theme = { default = 'nord' },
       sanity = { leader = ' ' },
       dashboard = { auto_open = true },
-      icons = { style = 'emoji' },
+      icons = { style = 'nerd_font' },
       filetree = { width = 30 },
-      treesitter = { ensure_installed = true },
-      org = { todo_keywords = { 'TODO', 'DONE' } },
+      treesitter = { fold = true },
+      org = { todo_keywords = { 'TODO', 'DOING', 'DONE' } },
+      markdown = { tables = true, code_blocks = true },
       picker = { debounce_ms = { dynamic = 150 } },
+      whichkey = { triggers = { '<leader>' } },
+      sidebar = { position = 'right' },
+      notify = { position = 'top-right' },
+      activitybar = { position = 'right' },
+      lsp = { enable = true },
+      completion = { sources = { 'lsp', 'buffer', 'path' } },
+      url = { keymaps = { open = { 'gx' } } },
+      git = { sidebar = { position = 'left' } },
+      window = { manual = { resize_step = 5 } },
+      project = { readme_names = { 'readme.txt' } },
+      scratch = { filetype = 'markdown' },
     })
 <
-Default keymaps across mep are written with a `<Mod1-...>` placeholder,
-expanded by each library's setup(): Alt on Linux/Windows, Option (as
-Meta) on macOS. Retarget it globally via `opts.mods`, e.g. >
-    require('mep').setup({ mods = { mod1 = 'D' } })  -- Cmd, macOS GUIs
+Equivalent to calling `require('mep.sanity').setup({ leader = ' ' })`,
+`require('mep.icons').setup({ style = 'nerd_font' })`, and so on
+yourself — use whichever fits how you organize your config. Omit a
+library's key (or the whole call) to just get its defaults.
+
+Libraries are applied in a fixed order (`sanity` before `theme`/
+`whichkey`, since both bind `<leader>`-based keymaps that need
+`mapleader` already set; `sidebar` before `notify`/`activitybar`, since
+those build `mep.sidebar` instances) — see `lua/mep/init.lua`'s own
+`CONFIGURABLE_LIBRARIES` list and its header comment for the exact
+reasoning per library.
+
+==============================================================================
+Global modifier keys                                       *mep-modifier-keys*
+
+Default keymaps across mep are written with a `<Mod1-...>` placeholder
+instead of hard-coding `<A-...>`: `Mod1` resolves to Alt (`'A'`) on
+Linux/Windows and Option (`'M'`, i.e. Option-as-Meta) on macOS, and every
+library's `setup()` expands the placeholder (via `mep.core.keys`) in
+both its defaults and any keymaps you pass in, so you can use
+`<Mod1-...>` in your own overrides too.
+>lua
+    require('mep').setup({
+      -- Use Cmd instead of Option for every Mod1 binding (macOS GUIs
+      -- like Neovide; terminals generally can't send Cmd):
+      mods = { mod1 = 'D' },
+    })
 <
-Your own keymap overrides may use `<Mod1-...>` too. Extra names (mod2,
-...) expand only once configured in `mods`. On macOS the terminal must
-send Option as Meta (iTerm2 "Esc+", kitty macos_option_as_alt, Neovide
-macos_option_key_is_meta) for Option-based bindings to arrive at all.
+Additional names (`mod2`, `mod3`, ...) have no built-in default but
+expand the same way once configured (e.g. `mods = { mod2 = 'C' }` makes
+`<Mod2-x>` mean `<C-x>`).
 
-See README.md for the full defaults table of each library.
+Note for macOS terminal users: for Option to reach Neovim as Alt/Meta at
+all, the terminal must be set to send it that way — iTerm2's "Option
+key: Esc+", kitty's `macos_option_as_alt`, Neovide's
+`macos_option_key_is_meta`. That's a terminal setting, not something a
+plugin can do for you.
 
 ==============================================================================
-3. Commands                                                    *mep-commands*
+mep.core                                                            *mep-core*
 
-:MepFindFiles                                                *:MepFindFiles*
-    Fuzzy-find files under the project root.
+Async/parallel building blocks with no `setup()` of their own — plain
+libraries used directly.
 
-:MepLiveGrep                                                  *:MepLiveGrep*
-    Live-grep the project (requires `rg` on PATH).
+- `mep.core.coroutines` — minimal async/await on native Lua coroutines
+  (`wrap`, `await`, `run`, `async`). Turn any callback-style API into
+  something you can write as straight-line code.
+- `mep.core.job` — async external-process runner on top of
+  `vim.fn.jobstart`, streaming stdout/stderr line-by-line.
+- `mep.core.parallel` — genuine parallelism via libuv's threadpool
+  (`vim.uv.new_work`): `parallel.map(items, work_fn, on_done)` runs
+  `work_fn` on worker OS threads. `work_fn` runs in an isolated Lua
+  state, so it can't close over locals or call `vim.*` — only pure
+  computation on its arguments.
+- `mep.core.util` — `debounce`, `find_root` (nearest ancestor with
+  `.git`), `scan_dir` (synchronous recursive file listing fallback).
 
-:MepBufferSearch                                          *:MepBufferSearch*
-    Fuzzy-find lines in the current buffer.
+==============================================================================
+mep.sanity                                                        *mep-sanity*
 
-Inside any picker prompt (insert or normal mode): >
-    <C-n> <Down> <C-j>   next result
-    <C-p> <Up>   <C-k>   previous result
-    <CR>                 select
-    <Esc> <C-c>          close
+A small, growing set of opinionated-but-overridable Neovim defaults, each
+independently configurable and individually disableable (set its option
+to `false`):
+
+- **leader** (`leader`) — sets `mapleader`/`maplocalleader`. Default
+  `' '` (space).
+- **tabs** (`tabs`) — tab keymaps. Default `<C-t>` (`:tabnew`),
+  `<Mod1-1>`..`<Mod1-9>` (jump straight to tab 1-9) — not
+  `<C-Tab>`/`<C-S-Tab>`-style cycling, since most terminals don't send a
+  distinguishable code for those at all.
+- **number**/**signcolumn** (`gutter`) — turns on line numbers and the
+  sign column (always shown, not just `'auto'`). Both default to `true`.
+
+>lua
+    require('mep.sanity').setup({})
+    -- leader = ' ', tabs.keymaps = { new = {'<C-t>'}, select = {'<Mod1-1>',...,'<Mod1-9>'} },
+    -- number = true, signcolumn = true
+    require('mep.sanity').setup({ leader = ',' })
+    require('mep.sanity').setup({ leader = false }) -- don't touch mapleader at all
+    require('mep.sanity').setup({ tabs = { keymaps = false } }) -- no tab keymaps
 <
-:MepFileTreeToggle                                        *:MepFileTreeToggle*
-    Toggle the file tree sidebar.
-
-:MepFileTreeRefresh                                      *:MepFileTreeRefresh*
-    Re-scan expanded directories in the file tree.
-
-:MepDashboard                                                  *:MepDashboard*
-    Show the dashboard in the current window.
-
-:MepTreesitterInstall {name}                          *:MepTreesitterInstall*
-    Install one parser from the curated registry (Tab-completes names).
-
-:MepTreesitterInstallAll                           *:MepTreesitterInstallAll*
-    Install every parser in the curated registry.
-
-mep.org has no commands of its own — see its keymaps below.
 
 ==============================================================================
-4. Core library                                                    *mep.core*
+mep.theme                                                          *mep-theme*
 
-`require('mep.core')` (alias of `require('mep.core.core')`) exposes:
+28 built-in colorschemes (19 dark, 9 light: `gruvbox-dark`/`-light`,
+`nord`/`-light`, `dracula`, `tokyo-night`, `catppuccin-mocha`/`-latte`,
+`one-dark`/`-light`, `everforest-dark`/`-light`, `rose-pine`/`-dawn`,
+`solarized-dark`/`-light`, `monokai`, `kanagawa`, `ayu-dark`/`-mirage`,
+`github-dark`/`-light`, `nightfox`, `horizon`, `zenburn`, `synthwave84`,
+`oxocarbon-dark`/`-light`). Each theme is a compact ~13-field palette
+(bg/fg plus seven accent hues) rendered by one shared, data-driven
+generator covering every standard Neovim highlight group plus common
+treesitter `@`-captures.
 
-mep.core.coroutines                                       *mep.core.coroutines*
-    Minimal async/await on native coroutines: `.wrap(fn)`, `.await(thunk)`,
-    `.run(fn, on_done)`, `.async(fn)`.
-
-mep.core.job                                                     *mep.core.job*
-    `.spawn(opts)` — async external process via `jobstart`, streaming
-    stdout/stderr line-by-line. `opts = { cmd, cwd, on_stdout(line),
-    on_stderr(line), on_exit(code) }`. Returns `{ id, kill() }`.
-
-mep.core.parallel                                           *mep.core.parallel*
-    `.map(items, work_fn, on_done)` — true parallelism via libuv's
-    threadpool (`vim.uv.new_work`). `work_fn` runs on a worker OS thread in
-    an isolated Lua state: no upvalues, no `vim.*` calls inside it.
-
-mep.core.util                                                   *mep.core.util*
-    `.debounce(fn, ms)`, `.find_root(path, markers)`, `.scan_dir(root,
-    items, max_items)`, `.open_file(filename, lnum, col)`.
-
-==============================================================================
-5. Sanity library                                                *mep.sanity*
-
-`require('mep.sanity').setup(opts)` applies a small set of opinionated but
-overridable Neovim defaults. Currently just `leader` (default `' '`, sets
-`mapleader`/`maplocalleader`; `false` leaves it untouched).
-
-==============================================================================
-6. Dashboard library                                          *mep.dashboard*
-
-`require('mep.dashboard').setup(opts)` shows content in place of Neovim's
-own intro screen, under the same trigger conditions (no file args, one
-window, an untouched empty buffer, no piped stdin). Default content is a
-constructed recreation of Neovim's own startup message (which can't be
-captured live — `:intro` draws directly to the screen grid) plus a
-block-character logo, with `NVIM vX.Y.Z` and `MEP vX.Y.Z` lines computed
-live from `vim.version()` and `mep.version`.
-
-Options: `auto_open` (default true), `content` (`'intro'` | function |
-list of lines).
-
-==============================================================================
-7. Icons library                                                  *mep.icons*
-
-`require('mep.icons')` looks up an icon for a file (`.get_file_icon(name)`)
-or directory (`.get_directory_icon(is_open)`), plus a tree-expand marker
-(`.get_expand_marker(is_open)`). Three styles via `setup({ style = ... })`:
-`'emoji'` (default, no special font needed), `'nerd_font'` (needs a Nerd
-Font installed), `'ascii'` (7-bit fallback, no per-type icons). Override or
-add icons per style via `overrides`.
-
-==============================================================================
-8. Filetree library                                            *mep.filetree*
-
-`require('mep.filetree')` is a single persistent tree sidebar (a real
-vertical split), backed by lazy one-level-at-a-time directory scanning.
-`.toggle(opts)` / `.open(opts)` / `.close()` / `.refresh()` / `.reset()`.
-Options via `setup()`: `width`, `root`, `show_hidden`, and
-`keymaps.open`/`expand`/`collapse`/`close`/`refresh`.
-
-==============================================================================
-9. Treesitter library                                        *mep.treesitter*
-
-`require('mep.treesitter').setup(opts)` does two things:
-
-Activation (always safe, no network/compiler): starts highlighting
-(`vim.treesitter.start`) and optionally folding
-(`vim.treesitter.foldexpr()`) for any buffer whose filetype has a parser
-available from anywhere — bundled with Neovim, installed by mep, or
-installed by anything else.
-
-Installing (needs `git` + a C compiler on PATH; degrades gracefully to a
-single warning if either is missing): fetches and compiles any missing
-parser from a curated ~27-language registry (`mep.treesitter.parsers`, each
-entry verified against nvim-treesitter's own registry, including `org` for
-mep.org) in the background, installing to `stdpath('data')/site/parser/`.
-
-Options: `highlight` (default true), `fold` (default false),
-`ensure_installed` (default true = the whole curated list; a list of names;
-or false to disable installing), `install_dir`.
-
-==============================================================================
-10. Org library                                                     *mep.org*
-
-`require('mep.org').setup(opts)` — a first, deliberately-bounded pass at
-org-mode: headline structure and editing, TODO state, priorities,
-dates/scheduling, tags (inheritance, match syntax, fast selection,
-alignment), links (parse, conceal, follow, insert, store), plain lists
-(continuation, indent/outdent, renumber), sparse-tree search, property
-drawers, clocking and effort estimates, capture templates, an agenda
-(day/week views, global TODO list, tag search), org-babel (execute/
-tangle src blocks), checkboxes and statistics cookies, folding/
-visibility, sorting, narrowing, archiving, refiling, easy templates, and
-syntax highlighting. NOT implemented: org-export. Real
-org-mode (even the mature community nvim-orgmode plugin) is a huge
-surface; this covers "core" solidly rather than everything shallowly —
-see ORGMODE_ROADMAP.md for the full phase breakdown.
-
-Everything except highlighting is pure line-pattern parsing
-(mep.org.headline — no tree-sitter parser needed), so it all works even
-before/without the `org` parser being installed:
-
-    mep.org.outline     next/prev/parent_headline, subtree_end,
-                        change_level (one headline), change_level_subtree,
-                        move_subtree
-    mep.org.edit        insert_headline / insert_todo_headline
-    mep.org.todo        .cycle(bufnr, lnum, todo_keywords)
-    mep.org.priority    .set / .cycle(bufnr, lnum, priorities) — [#A]
-                        cookies, default cycle A -> B -> C -> none
-    mep.org.timestamp   active <..> / inactive [..] timestamps, optional
-                        time/range + repeater; insert_or_edit,
-                        adjust_under_cursor(bufnr, win, delta) (days)
-    mep.org.plan        SCHEDULED:/DEADLINE: planning lines;
-                        schedule_interactive / deadline_interactive
-    mep.org.tags        effective_tags (inheritance), set_tags/
-                        toggle_tag, align_line/align_buffer,
-                        select_interactive (fast tag-selection popup)
-    mep.org.tagmatch    +tag-tag / | filter-expression parse + eval,
-                        no buffer access — for Phase 6/9 to reuse
-    mep.org.link        [[target]]/[[target][desc]]; follow, insert_
-                        interactive, store_link; id:/#custom-id read via
-                        mep.org.property
-    mep.org.linkconceal  extmark-based concealment of [[...][ / ]]
-                        (no link node in the grammar to query against)
-    mep.org.list        bulleted/ordered items; continue_at_cursor
-                        (insert-mode <CR>), indent_item/outdent_item,
-                        renumber
-    mep.org.sparse      sparse-tree search: show_matching(bufnr, win,
-                        predicate) folds to matches + ancestors;
-                        tag_search_interactive / todo_search_interactive
-                        (the latter via mep.picker); clear
-    mep.org.property    :PROPERTIES: drawers; get/set/remove, find_by,
-                        set_interactive
-    mep.org.clock       clock_in/clock_out (:LOGBOOK: CLOCK: entries,
-                        one open at a time, found by scanning the
-                        buffer); status(bufnr) for your own statusline;
-                        effort(bufnr, lnum); insert_report (clocktable)
-    mep.org.capture     capture_templates -> mep.picker -> expand
-                        placeholders (%?/%a/%i/%T/%U/%t/%u/%^{..}/%%)
-                        into a popup; <C-c><C-c> files it, <C-c><C-k>
-                        aborts. capture_interactive(templates) is a
-                        plain function -- bind it globally yourself for
-                        real "capture from any buffer" (see README.md)
-    mep.org.agenda      day/week views, global TODO list, tag search,
-                        aggregated across config.agenda_files;
-                        dispatch_interactive(config) is a plain function
-                        -- bind it globally yourself for real
-                        "agenda from any buffer" (see README.md)
-    mep.org.babel       execute/tangle #+begin_src blocks; execute(bufnr,
-                        lnum) runs the block at lnum, writing output into
-                        a #+RESULTS: block; supports lua/python/sh
-                        (bash alias)/javascript (js alias), each resolved
-                        to whatever interpreter is on PATH; tangle_block/
-                        tangle_buffer extract :tangle-targeted bodies to
-                        real files; :var/:results value/output header
-                        args (see README.md for the full contract)
-    mep.org.checkbox    .toggle / .is_checked(bufnr, lnum)
-    mep.org.statistics  keeps a headline's [n/m]/[n%] cookie in sync with
-                        checkboxes or child-headline TODO state
-    mep.org.sort        sort sibling subtrees (alpha, todo, or priority)
-    mep.org.narrow      fold-based approximation of buffer narrowing
-    mep.org.archive     move a subtree to a <file>_archive.org
-    mep.org.refile      move a subtree to become another headline's
-                        last child; refile_interactive via mep.picker
-    mep.org.visibility  global overview/contents/all cycling
-    mep.org.templates   easy templates (<s<Tab> etc.)
-    mep.org.fold        headline-depth foldexpr (the fold unit is the
-                        subtree, not every syntax node — see README.md)
-
-Highlighting delegates to mep.treesitter's `org` parser entry. The query
-file (queries/org/highlights.scm) is hand-written against the grammar's
-real node types using only predicates built into Neovim's query engine
-(not nvim-orgmode's own query, which needs custom Lua predicates that plugin
-registers itself) — see README.md for what that trades off.
-
-Keymaps (buffer-local to org filetype buffers), all overridable via
-`setup({ keymaps = {...} })`: >
-    <C-c><C-n>          next headline                       (normal)
-    <C-c><C-p>          previous headline                    (normal)
-    <Mod1-Left>/<Mod1-Right>  promote/demote current headline (normal)
-    <Mod1-S-Left>/<Mod1-S-Right>  promote/demote whole subtree  (normal)
-    <Mod1-S-Up>/<Mod1-S-Down>  move subtree among siblings     (normal)
-    <Mod1-CR>           insert sibling headline               (normal)
-    <Mod1-S-CR>         insert sibling TODO headline          (normal)
-    <C-c><C-t>          cycle TODO state (refreshes cookies)  (normal)
-    <C-c>,              cycle priority cookie                 (normal)
-    <C-c><C-c>          toggle checkbox (refreshes cookies)   (normal)
-    <Tab>               toggle fold under cursor              (normal)
-    <S-Tab>             cycle global visibility                (normal)
-    <C-c>^              sort current headline's siblings       (normal)
-    <C-c>n / <C-c>N     narrow / widen to current subtree      (normal)
-    <C-c><C-x><C-a>     archive current subtree                (normal)
-    <C-c><C-w>          refile current subtree                 (normal)
-    <C-c>. / <C-c>!     insert/edit active/inactive timestamp  (normal)
-    <C-c><C-s>/<C-c><C-d>  schedule / set deadline              (normal)
-    <C-a>/<C-x>         adjust timestamp under cursor by        (normal)
-                        [count] days (a week: 7<C-a>); falls
-                        back to native increment/decrement off
-                        a timestamp
-    <C-c><C-q>          fast tag-selection popup                (normal)
-    <C-c><C-o>          follow link under cursor                (normal)
-    <C-c><C-l>          insert link (visual: wrap selection)    (normal, visual)
-    <C-c>l              store link to current headline          (normal)
-    <C-c>> / <C-c><     indent / outdent list item under cursor (normal)
-    <C-c>#              renumber ordered list at cursor          (normal)
-    <C-c>/              sparse-tree search (tag or TODO state)   (normal)
-    <C-c><C-x>p         set a property (prompts key then value) (normal)
-    <C-c><C-x><C-i>/<C-c><C-x><C-o>  clock in / clock out       (normal)
-    <C-c><C-x><C-r>     insert/refresh clock-table report        (normal)
-    <C-c>c              capture (picker over capture_templates)  (normal, visual)
-    <C-c>a              agenda (prompts day/week/todo/tags view)  (normal)
-    <C-c>e / <C-c>E     execute src block at cursor / tangle buffer (normal)
-    <Tab>               expand easy template, else normal Tab (insert)
-    <CR>                continue list item, else plain newline (insert)
+>lua
+    require('mep.theme').setup({}) -- default='gruvbox-dark', apply_on_setup=true, keymaps.picker={'<leader>ut'}
+    require('mep.theme').apply('nord')
+    require('mep.theme').list() -- every registered theme name, sorted
+    require('mep.theme').register('my-theme', {
+      dark = true, bg = '#000000', fg = '#ffffff', red = '#ff5555',
+      green = '#50fa7b', yellow = '#f1fa8c', blue = '#8be9fd',
+      purple = '#bd93f9', cyan = '#8be9fd', orange = '#ffb86c', border = '#44475a',
+    })
 <
-The capture popup itself has two fixed (not configurable) keymaps,
-matching real org-mode's own capture-buffer bindings: <C-c><C-c> files
-the entry and closes, <C-c><C-k> aborts without filing.
+`<leader>ut` (or `:MepThemePicker`) opens a fuzzy picker over every
+registered theme: moving the selection applies it live and renders a
+color-swatch breakdown in the picker's preview sidebar; Enter commits,
+Escape/`<C-c>` reverts to whatever was active before. `:MepTheme {name}`
+(tab-completes) applies one directly.
 
-Options: `todo_keywords` (default `{'TODO', 'DONE'}`), `highlight` (default
-true), `fold` (default true), `sort_criteria` (default `'alpha'`),
-`priorities` (default `{'A', 'B', 'C'}`), `tags` (default `{}`),
-`tags_column` (default `77`; `false` disables auto-align),
-`conceal_links` (default true), `capture_templates` (default `{}`),
-`agenda_files` (default `{}`; literal paths and/or glob patterns),
-`deadline_warning_days` (default `14`), `keymaps`.
+Commands ~
+    :MepTheme {name}         Apply a theme directly (tab-completes).
+    :MepThemePicker          Open the fuzzy theme picker.
+
+mep's own custom highlight groups all `link` to standard groups this
+renders, so they track whichever theme is active automatically.
 
 ==============================================================================
-11. Picker library                                               *mep.picker*
+mep.dashboard                                                  *mep-dashboard*
 
-`require('mep.picker')` (alias of `require('mep.picker.picker')`) exposes:
+Takes over the initial empty buffer at startup — the same trigger
+conditions as Neovim's own `:intro` screen (no file arguments, a single
+untouched empty buffer, one window, no piped stdin) — and renders
+content into it instead: a constructed recreation of Neovim's own intro
+message by default, with a block-character logo above `NVIM vX.Y.Z` and
+an `MEP vX.Y.Z` line under it (both computed live).
 
-    .find_files(opts)     project file picker
-    .live_grep(opts)      within-project search
-    .buffer_search(opts)  within-document search
-    .start(opts)          build a custom picker
-    .Picker                the picker class (see lua/mep/picker/engine.lua)
+>lua
+    require('mep.dashboard').setup({}) -- auto_open = true, content = 'intro'
+    require('mep.dashboard').setup({ content = { 'Welcome!', '', ':MepFindFiles to start' } })
+    require('mep.dashboard').setup({ content = function() return {...} end })
+    require('mep.dashboard').setup({ auto_open = false })
+<
+Commands ~
+    :MepDashboard             Show the dashboard in the current window.
+                               Lua: require('mep.dashboard').open()
 
-Each picker is a floating prompt + results list + preview sidebar. See
-README.md for the full opts reference and a custom-picker example.
+Content is centered both horizontally and vertically; the window's own
+gutter (`number`/`relativenumber`/`signcolumn`) is turned off for as
+long as that window keeps showing the dashboard.
+
+Highlight groups ~
+    MepDashboardLogo          block-character logo (links to Title)
+    MepDashboardVersion       NVIM/MEP version lines (links to Title)
+    MepDashboardCommand       `:command<Enter>` hints (links to Special)
+    MepDashboardLink          URLs (links to Underlined)
+
+==============================================================================
+mep.icons                                                          *mep-icons*
+
+Looks up an icon glyph for a file (by exact basename, then lowercased
+extension, falling back to a generic file icon) or a directory
+(closed/open variants), plus a matching tree-expand marker. Three
+styles:
+
+- `nerd_font` (default) — monochrome Nerd Font glyphs with real
+  per-language differentiation, pulled from nvim-web-devicons' own
+  default-icon tables.
+- `emoji` — standard Unicode emoji covering ~40 common extensions and a
+  few special filenames. Renders everywhere, no font needed.
+- `ascii` — plain 7-bit fallback, no per-type icons.
+
+>lua
+    require('mep.icons').setup({ style = 'emoji' })
+    require('mep.icons').get_file_icon('main.lua')      --> icon, 'MepIconFile'
+    require('mep.icons').get_directory_icon(true)        --> open-folder icon, 'MepIconDirectory'
+<
+Layer your own icons on top of (or instead of) the built-ins per style
+via `overrides`, e.g.
+`overrides = { emoji = { by_extension = { lua = '🌛' } } }` — see
+`lua/mep/icons/data.lua` for the full built-in tables.
+
+==============================================================================
+mep.filetree                                                    *mep-filetree*
+
+A single persistent tree panel (a real vertical split, not a floating
+window) backed by lazy, one-level-at-a-time directory scanning. Always
+renders through |mep-icons| — its icon style (and any `overrides`) come
+from `require('mep.icons').setup({...})`.
+
+Commands ~
+    :MepFileTreeToggle        Open/close the tree.
+                               Lua: require('mep.filetree').toggle()
+    :MepFileTreeRefresh       Re-scan expanded directories in place.
+                               Lua: require('mep.filetree').refresh()
+
+`toggle()`/`open()` accept an optional `{ root = ... }`, defaulting to
+`mep.filetree.config.options.root` and then `core.util.find_root()`.
+
+Keymaps (inside the tree, normal mode) ~
+    <CR> / o           Open file under cursor (in the window the tree
+                        was opened from), or toggle a directory
+    <C-o>              Open with the OS's default program (`vim.ui.open`)
+    l / <Right>        Expand directory under cursor
+    h / <Left>         Collapse an expanded directory, or jump to parent
+    q / <Esc>          Close the tree
+    R                  Refresh
+    a                  Create a file/directory (trailing `/` = directory)
+    r                  Rename the file/directory under the cursor
+    d                  Delete the file/directory under cursor (confirms;
+                        directories removed recursively)
+    ?                  Toggle a popup listing every keymap above
+
+>lua
+    require('mep.filetree').setup({
+      width = 30, root = nil, show_hidden = false,
+    })
+<
+All configurable: `width`, `root`, `show_hidden`, and
+`keymaps.open`/`open_system`/`expand`/`collapse`/`close`/`refresh`/`add`/
+`rename`/`delete`/`help` (each a list of lhs strings) — see
+`lua/mep/filetree/config.lua` for the full defaults.
+
+Highlight groups ~
+    MepIconFile               file icons (links to Normal)
+    MepIconDirectory           directory icons (links to Directory)
+    MepFiletreeDirectory       directory names in the tree (links to Directory)
+
+==============================================================================
+mep.treesitter                                                *mep-treesitter*
+
+Two separate things, both on by default:
+
+- **Activation** (`mep.treesitter.activate`) — starts highlighting
+  (`vim.treesitter.start`), and optionally folding, for any buffer whose
+  filetype has a parser available from anywhere (bundled with Neovim,
+  installed by mep, or installed by anything else). Pure `vim.treesitter`
+  API, no network, no compiler.
+- **Installing** (`mep.treesitter.install`) — a curated registry of
+  ~40 common languages (including `org` for |mep-org|). Missing parsers
+  are fetched (`git clone --depth 1`) and compiled (`cc`/`gcc`/`clang`)
+  in the background on `setup()`, installed to
+  `stdpath('data')/site/parser/`. Degrades gracefully (one warning,
+  nothing installed) if git or a compiler isn't found. Each install also
+  copies that grammar's own upstream `queries/` directory to
+  `stdpath('data')/site/queries/<lang>/`.
+
+>lua
+    require('mep.treesitter').setup({}) -- highlight=true, fold=false, ensure_installed=true
+    require('mep.treesitter').setup({ ensure_installed = { 'lua', 'python', 'rust' } })
+    require('mep.treesitter').setup({ ensure_installed = false }) -- activate-only
+    require('mep.treesitter').setup({ fold = true })
+<
+Commands ~
+    :MepTreesitterInstall {name}    Install one parser (tab-completes
+                                     the curated list).
+    :MepTreesitterInstallAll        Install every parser in the curated
+                                     registry.
+
+==============================================================================
+mep.org                                                              *mep-org*
+
+Org-mode structure, editing, and highlighting, built in phases — see
+`ORGMODE_ROADMAP.md` for what's shipped vs. not yet. What's landed:
+headline structure/editing, TODO state, priorities, dates/scheduling,
+tags (inheritance, match syntax, fast selection, alignment), links
+(parse/conceal/follow/insert/store), plain lists, sparse-tree search,
+property drawers, clocking/effort, capture templates, an agenda
+(day/week/global-TODO/tag-search across `agenda_files`), org-babel
+(execute/tangle `#+begin_src` blocks, poly-mode LSP/highlighting per
+block), org-export (ascii/markdown/html), footnotes, generic blocks,
+macros, `#+INCLUDE:`, org-id, attachments, checkboxes/statistics
+cookies, folding/visibility, sorting, narrowing, archiving, refiling,
+and easy templates.
+
+Everything except highlighting is pure line-pattern parsing (no
+tree-sitter parser required), so structure editing works even before
+the `org` parser is installed. Key modules: `mep.org.outline` (headline
+navigation/promote/demote/move), `mep.org.edit` (insert headlines),
+`mep.org.todo` (cycle TODO state), `mep.org.priority` (`[#A]` cookie
+cycling), `mep.org.timestamp` (active/inactive dates, repeaters),
+`mep.org.plan` (SCHEDULED/DEADLINE), `mep.org.tags` (inheritance, fast
+selection, alignment), `mep.org.tagmatch` (filter-expression parsing),
+`mep.org.link`/`mep.org.linkconceal`, `mep.org.checkbox`/`statistics`,
+`mep.org.sort`/`narrow`/`archive`/`refile`/`visibility`/`templates`,
+`mep.org.list` (bulleted/ordered items), `mep.org.sparse` (sparse-tree
+search), `mep.org.property` (`:PROPERTIES:` drawers), `mep.org.clock`
+(clocking, clocktable report), `mep.org.capture` (templates, `<C-c>c`),
+`mep.org.agenda` (`<C-c>a`), `mep.org.babel` (`<C-c>e`/`<C-c>E`; ~25
+languages resolved to whatever interpreter/compiler is on PATH),
+`mep.org.fold`, `mep.org.block`, `mep.org.footnote`, `mep.org.macro`,
+`mep.org.include`, `mep.org.id`, `mep.org.attach`, and `mep.org.export`
+(`<C-c><C-e>`, ascii/markdown/html backends; real org tables aren't
+part of the model, LaTeX/PDF/ODT are out of scope).
+
+Poly mode (`mep.org.polyglot`, active by default) gives each
+`#+begin_src <lang>` block real syntax highlighting (tree-sitter
+injection) and real LSP features (hover/definition/references/
+rename/diagnostics/completion) sourced from that language's own server,
+via a hidden "shadow buffer" per language kept in sync at the same line
+numbers. `polyglot = false` turns off the LSP bridging (highlighting is
+unaffected); `polyglot = { keymaps = {...} }` rebinds just its keymaps.
+
+>lua
+    require('mep.org').setup({})
+    -- todo_keywords={'TODO','DONE'}, todo_highlight=true,
+    -- todo_keyword_colors={TODO='DiagnosticError', DONE='DiagnosticOk'},
+    -- highlight=true, fold=true, sort_criteria='alpha', priorities={'A','B','C'},
+    -- tags={}, tags_column=77, conceal_links=true, capture_templates={},
+    -- agenda_files={}, deadline_warning_days=14, attach_dir='data',
+    -- polyglot={keymaps={...}}
+    require('mep.org').setup({
+      todo_keywords = { 'TODO', 'DOING', 'WAITING', 'DONE', 'CANCELLED' },
+      todo_keyword_colors = { TODO = 'DiagnosticError', DONE = 'DiagnosticOk' },
+    })
+    require('mep.org').setup({ capture_templates = {
+      { key = 't', description = 'Task', target = { file = '~/todo.org' }, template = '* TODO %? %a' },
+    } })
+    require('mep.org').setup({ agenda_files = { '~/notes/*.org' }, deadline_warning_days = 7 })
+    require('mep.org').setup({ polyglot = false })
+<
+Keymaps (inside org buffers) ~
+    <C-c><C-n> / <C-c><C-p>        Next / previous headline
+    <Mod1-Left>/<Mod1-Right>       Promote/demote current headline
+    <Mod1-S-Left>/<Mod1-S-Right>   Promote/demote whole subtree
+    <Mod1-S-Up>/<Mod1-S-Down>      Move subtree among siblings
+    <Mod1-CR> / <Mod1-S-CR>        Insert sibling headline / TODO headline
+    <C-c><C-t>                     Cycle TODO state
+    <C-c>,                         Cycle priority cookie
+    <C-c><C-c>                     Toggle checkbox under cursor
+    <Tab> / <S-Tab>                Toggle fold / cycle global visibility
+    <C-c>^                         Sort current headline's siblings
+    <C-c>n / <C-c>N                Narrow / widen to current subtree
+    <C-c><C-x><C-a>                Archive current subtree
+    <C-c><C-w>                     Refile current subtree (via mep.picker)
+    <C-c>. / <C-c>!                Insert/edit active/inactive timestamp
+    <C-c><C-s> / <C-c><C-d>        Schedule / set deadline
+    <C-a> / <C-x>                  Adjust timestamp under cursor by
+                                    [count] days
+    <C-c><C-q>                     Fast tag-selection popup
+    <C-c><C-o>                     Follow link under cursor
+    <C-c><C-l>                     Insert link (normal, visual)
+    <C-c>l                         Store link to current headline
+    <C-c>> / <C-c><                Indent / outdent list item
+    <C-c>#                         Renumber ordered list at cursor
+    <C-c>/                         Sparse-tree search
+    <C-c><C-x>p                    Set a property
+    <C-c><C-x><C-i>/<C-x><C-o>     Clock in / clock out
+    <C-c><C-x><C-r>                Insert/refresh clock-table report
+    <C-c>c                         Capture (normal, visual)
+    <C-c>a                         Agenda
+    <C-c>e / <C-c>E                Execute src block / tangle buffer
+    <C-c><C-x>f                    Footnote action
+    <C-c><C-x>i                    Get-or-create :ID: property
+    <C-c><C-a>                     Attach a file to current headline
+    <C-c><C-e>                     Export (ascii/markdown/html)
+    <Tab>                          Expand easy template (insert mode)
+    <CR>                           Continue list item (insert mode)
+    gd/gD/gr/gi/<leader>lt          Poly mode: LSP goto-* (in a src block)
+    K / <C-k>                      Poly mode: hover / signature help
+    <leader>rn                     Poly mode: rename
+    [d/]d/<leader>le, [e/]e         Poly mode: diagnostics
+
+Fixed (non-configurable) inside the capture popup: `<C-c><C-c>` files
+the entry and closes, `<C-c><C-k>` aborts. All other keymaps are
+configurable via `require('mep.org').setup({ keymaps = {...} })` — see
+`lua/mep/org/config.lua` for the full defaults.
+
+==============================================================================
+mep.markdown                                                    *mep-markdown*
+
+Distinct highlighting for markdown structure, layered on top of
+|mep-treesitter|'s install+activate pipeline, plus a sign-column marker
+per heading line, box-drawn GFM tables, and shaded fenced-code-block
+backgrounds.
+
+- **Headers** — `@markup.heading.1`..`.6` each linked to a distinct
+  group so nesting depth is visible at a glance.
+- **Emphasis** — bold/italic colored on top of your theme's own weight.
+- **Gutter** (`mep.markdown.gutter`) — one sign per ATX heading line,
+  a circled digit by default (`①`-`⑥`, `config.gutter_symbols`).
+- **Tables** (`mep.markdown.tables`) — re-renders GFM pipe tables as
+  real box-drawn tables via overlay extmarks; the row under the cursor
+  is left un-overlaid so you can edit it directly.
+- **Code blocks** (`mep.markdown.codeblocks`) — shades every line of a
+  fenced code block with `MepMarkdownCodeBlock`.
+
+>lua
+    require('mep.markdown').setup({})
+    -- highlight=true, headers=true, emphasis=true, gutter=true,
+    -- gutter_symbols={'①',...,'⑥'}, tables=true, code_blocks=true
+<
+No dedicated toggle command — like |mep-org|, it activates automatically
+via `FileType`.
+
+==============================================================================
+mep.picker                                                        *mep-picker*
+
+A `Picker` (`lua/mep/picker/engine.lua`) drives a floating-window layout
+— prompt on top, results below, preview sidebar on the right — with
+fuzzy matching (a dependency-free fzf-style subsequence scorer) and live
+preview of the selected item.
+
+Commands ~
+    :MepFindFiles              Project files (`rg --files`, or a pure-
+                                Lua walk if `rg` isn't installed).
+                                Lua: require('mep.picker').find_files()
+    :MepLiveGrep                File contents across the project, via
+                                `rg` (required).
+                                Lua: require('mep.picker').live_grep()
+    :MepBufferSearch            Lines of the current buffer.
+                                Lua: require('mep.picker').buffer_search()
+    :MepBuffers                 Open (listed, loaded) buffers, MRU first.
+                                Lua: require('mep.picker').buffers()
+    :MepCommands                 User-defined Ex commands.
+                                Lua: require('mep.picker').commands()
+
+`find_files`/`live_grep`/`buffers` accept an optional `opts` table
+(`{ cwd = ... }` for the first two); `buffer_search` takes `{ bufnr =
+..., winid = ... }`; `commands` takes `{ bufnr = ... }`. `<CR>` on a
+command runs it directly, or prompts for its argument text first if its
+`nargs` calls for any.
+
+Keymaps (inside the picker, prompt window, insert or normal mode) ~
+    <C-n> / <Down> / <C-j>      Next result
+    <C-p> / <Up> / <C-k>        Previous result
+    <CR>                        Select
+    <Esc> / <C-c>               Close
+
+Type to filter — filtering is live, debounced (~20ms for local lists,
+~120ms for `rg`-backed live grep).
+
+>lua
+    require('mep.picker').setup({}) -- debounce_ms={static=20, dynamic=120}
+    require('mep.picker').setup({ triggers = { buffer_search = { '/' } } }) -- replace native /
+<
+`triggers.buffer_search` (unbound by default) opens `buffer_search()`
+from wherever you already are. Picker functions work with sensible
+defaults even if `setup()` is never called.
+
+Highlight groups ~
+    MepMatch                    fuzzy-matched characters (links to Search)
+    MepPreviewLine               target line in the preview pane (links to CursorLine)
+
+See |mep-custom-picker| for building your own.
+
+==============================================================================
+mep.whichkey                                                    *mep-whichkey*
+
+A popup showing what's bound under a prefix key — no separate
+registration step, anything already bound via `vim.keymap.set` shows up
+automatically (introspects real keymaps via `nvim_get_keymap`/
+`nvim_buf_get_keymap`). A mapping's `desc` becomes its label; without
+one, its string `rhs` is shown, or a generic placeholder for a bare
+callback with neither.
+
+`config.triggers` (default `{'<leader>'}`) become keymaps (in every
+`config.modes`, default `{'n'}`) that open the popup. A single
+unambiguous leaf under a prefix runs immediately with no popup.
+`config.position`: `'bottom'` (default, full editor width, column-major
+grid), `'top'`, or `'cursor'` (compact single column). `<Esc>`/`q`
+dismiss.
+
+>lua
+    require('mep.whichkey').setup({}) -- triggers={'<leader>'}, modes={'n'}, position='bottom', border='rounded'
+    require('mep.whichkey').setup({ triggers = { '<leader>', ',' } })
+    require('mep.whichkey').setup({ position = 'cursor' })
+<
+If `<leader>` is one of your triggers (the default), call
+`require('mep.whichkey').setup(...)` — or `require('mep').setup(...)` —
+after whatever sets `vim.g.mapleader`.
+
+==============================================================================
+mep.sidebar                                                      *mep-sidebar*
+
+A generic building block for a persistent panel of clickable,
+highlightable, hoverable widgets grouped into collapsible sections —
+|mep-activitybar| is the flagship example built entirely on this API.
+
+>lua
+    local sidebar = require('mep.sidebar').new({
+      title = 'Build',
+      position = 'right',          -- 'left' | 'right' | 'top' | 'bottom'
+      width = 40,                  -- 'height' for top/bottom
+      animate = true,               -- slide into/out of view
+      float = false,                -- true: a floating "popup buffer"
+      focus = true,                 -- false: leave cursor in previous window
+      sections = {
+        {
+          id = 'actions', title = 'Actions', collapsed = false,
+          widgets = {
+            {
+              id = 'run', text = 'Run build', icon = '▶',
+              hl = 'DiagnosticOk', tooltip = 'Click to run the build',
+              on_click = function(widget, sb) ... end,
+            },
+          },
+        },
+      },
+    })
+
+    sidebar:open()    -- :close(), :toggle(), :is_open()
+    sidebar:set_sections(new_sections)
+    sidebar:collapse_section('actions')  -- toggle, or force true/false
+    sidebar:resize(10)                   -- grow/shrink by N columns/rows
+<
+Two window styles (`opts.float`): a real split by default, or a floating
+window flush against `position`'s edge. More than one `mep.sidebar`
+instance can be open at once regardless of style.
+
+Keymaps (inside a sidebar buffer, overridable via `opts.keymaps`) ~
+    <CR> / <LeftRelease>       Activate widget/section header under cursor
+    q                          Close
+    + / =  and  -              Resize
+
+>lua
+    require('mep.sidebar').setup({}) -- position='right', width=30, height=15, animate=true, float=false, border='rounded'
+<
+
+==============================================================================
+mep.notify                                                        *mep-notify*
+
+Hooks `vim.notify` itself (`setup()` installs this automatically), so
+any notification from anywhere shows up without extra wiring. Every call
+becomes two things at once: a small, auto-dismissing popup toast, and a
+permanent entry in a scrollable history panel.
+
+Toasts stack in a screen corner (`config.position`, default
+`'top-right'`), capped at `config.max_visible` (default 5). Colored and
+iconed by level (plain Unicode glyphs `✗ ⚠ ℹ ·`, no Nerd Font needed),
+auto-dismiss after `config.timeout[level]` ms.
+
+>lua
+    require('mep.notify').setup({}) -- position='top-right', max_visible=5, max_entries=200
+    require('mep.notify').setup({ position = 'bottom-left', max_width = 50 })
+    require('mep.notify').setup({ timeout = { [vim.log.levels.INFO] = 2000 } })
+<
+Commands ~
+    :MepNotifyPanel        Toggle the standalone history panel.
+                            Lua: require('mep.notify').toggle()
+    :MepNotifyClear         Clear all notification history.
+                            Lua: require('mep.notify').clear()
+    :MepNotifyDismiss       Dismiss every currently-visible toast.
+                            Lua: require('mep.notify').popup.dismiss_all()
+
+The history panel lists every entry newest-first; click one (or press
+`d`/`x`) to dismiss it, `C` ("Clear all") to empty the list. Capped at
+`config.max_entries` (default 200). |mep-activitybar|'s own
+notifications button is a second view onto this exact same entry list.
+
+Highlight groups ~
+    MepNotifyError / Warn / Info / Debug     linked to Diagnostic* groups
+
+==============================================================================
+mep.activitybar                                              *mep-activitybar*
+
+A slim, persistent, icon-only button column (`config.position`, default
+`'right'`) that toggles four flyout panels, each a |mep-sidebar|
+instance (`float = true`) that slides into view next to it. The bar
+itself never takes focus on open (opens automatically on startup if
+`config.auto_open`); its panels do, except the git one.
+
+- **Notifications** — a view onto |mep-notify|'s own entry list.
+- **Todo** — "Add todo..." prompts via `vim.ui.input`; click to toggle
+  done; persisted as JSON to `config.todo.persist_path`.
+- **Tests** — "Run tests" shells out to `config.tests.cmd` (default
+  `{'busted'}`) via `mep.core.job`; clicking a failure shows its full
+  reason. Parser is written against busted's own terminal reporter.
+- **Git** — |mep-git|'s status/hunks content and keymaps, anchored next
+  to this bar.
+
+>lua
+    require('mep.activitybar').setup({}) -- position='right', panel_width=42, animate=true, float=true, auto_open=false
+    require('mep.activitybar').setup({ tests = { cmd = { 'npm', 'test' } } })
+    require('mep.activitybar').setup({ auto_open = true })
+<
+Commands ~
+    :MepActivityBarToggle       Toggle the button bar.
+    :MepNotifications            Toggle the notifications panel.
+    :MepTodo                     Toggle the todo panel.
+    :MepTests                    Toggle the tests panel.
+    :MepTestsRun                 Run tests without opening the panel.
+    :MepGitPanel                  Toggle the git panel.
+
+Also reachable as `require('mep.activitybar').toggle_bar()`/
+`.toggle_panel('notifications' | 'todo' | 'tests' | 'git')`, or drill
+into `.notifications`/`.todo`/`.tests`/`.git` for their full API.
+
+==============================================================================
+mep.lsp                                                              *mep-lsp*
+
+**Requires Neovim >= 0.11.** Registers a curated registry of servers
+(lua_ls, pyright, ts_ls, gopls, rust_analyzer, clangd, bashls, jsonls,
+yamlls, marksman, zls, nimlsp, crystalline, jdtls,
+kotlin_language_server, haskell_language_server, ocamllsp, serve_d) via
+Neovim's own native `vim.lsp.config`/`vim.lsp.enable` — activating a
+server only if its `cmd[1]` is found on `PATH`. **No server is ever
+installed** — install the ones you want yourself.
+
+On `LspAttach`, binds the classic `gd`/`gD`/`gr`/`gi`/`K` vocabulary
+plus rename/code-action/format/signature-help/diagnostic-navigation, and
+turns on native LSP-driven completion (`vim.lsp.completion.enable`) for
+any client that supports it.
+
+>lua
+    require('mep.lsp').setup({}) -- enable=true, servers={}, completion=true, diagnostics={...}, keymaps={...}
+    require('mep.lsp').setup({ enable = { 'lua_ls', 'rust_analyzer' } })
+    require('mep.lsp').setup({ servers = { my_server = { cmd = {'my-ls'}, filetypes = {'myft'}, root_markers = {'.git'} } } })
+<
+Keymaps ~
+    gd / gD                normal      Goto definition / declaration
+    gr / gi                 normal      References / goto implementation
+    K                       normal      Hover
+    <C-k>                    normal, insert    Signature help
+    <leader>rn               normal      Rename
+    <leader>ca                normal, visual   Code action
+    <leader>lf                normal      Format
+    <leader>lt                normal      Goto type definition
+    <leader>le                normal      Show diagnostic under cursor
+    [d / ]d                  normal      Previous/next diagnostic
+    [e / ]e                  normal      Previous/next ERROR diagnostic
+
+Commands ~
+    :MepLspInfo                Show LSP clients attached to the current
+                                buffer.
+
+`enable` mirrors treesitter's `ensure_installed` shape: `true` (default,
+every curated-plus-your-own server found on `PATH`), a list of names, or
+`false` (register configs without auto-activating).
+
+==============================================================================
+mep.completion                                                *mep-completion*
+
+Debounced multi-source completion merged into Neovim's own native
+insert-mode completion popup (`vim.fn.complete()`) — no custom floating
+UI. `<C-n>`/`<C-p>` navigate, `<C-y>` accepts, `<C-e>` aborts (Neovim's
+own built-ins); `<C-Space>` (configurable) manually invokes it.
+
+Three built-in sources, queried together and merged (first-listed source
+wins a duplicate `word`):
+
+- **`lsp`** — queries every attached LSP client supporting
+  `textDocument/completion`. Inside a poly-mode org src block, completions
+  come from that language's own client instead.
+- **`buffer`** — the current buffer's own keyword-shaped tokens.
+- **`path`** — filesystem entries once the text before the cursor looks
+  like a path.
+
+>lua
+    require('mep.completion').setup({}) -- sources={'lsp','buffer','path'}, debounce_ms=80, min_chars=1, max_items=50, auto_trigger=true
+    require('mep.completion').setup({ sources = { 'buffer' } })
+    require('mep.completion').setup({ auto_trigger = false })
+<
+If you use both |mep-lsp| and this together, pass
+`lsp = { completion = false }` to `mep.lsp.setup()` — otherwise both
+trigger LSP completion independently.
+
+Add your own source by extending `require('mep.completion').sources`
+with a module exposing `complete(ctx, callback)` — see
+`mep.completion.sources.buffer`/`.lsp` for reference.
+
+==============================================================================
+mep.url                                                              *mep-url*
+
+`gx` opens the URL under the cursor — **overrides Neovim's own built-in
+`gx`** (`vim.ui.open`, Neovim >= 0.10), with a graceful fallback on older
+Neovim. `gX` lists every URL in the current buffer via |mep-picker| and
+opens whichever one you pick.
+
+>lua
+    require('mep.url').setup({}) -- keymaps: open={'gx'}, pick={'gX'}
+<
+Commands ~
+    :MepOpenUrl          Open the URL under the cursor (same as `gx`).
+    :MepUrls              List every URL in the buffer (same as `gX`).
+
+Pure line-pattern matching handles `http(s)://`, other `scheme://` URLs,
+and `mailto:`, trimming trailing sentence punctuation and surrounding
+parens/brackets/quotes. `find_all(bufnr)`/`open(url)` are plain
+functions too.
+
+==============================================================================
+mep.git                                                              *mep-git*
+
+A git gutter (`mep.git.gutter`) plus a status panel (`mep.git.sidebar`,
+built on |mep-sidebar|) sharing the same underlying hunk data.
+
+The gutter attaches to any normal, file-backed buffer inside a git repo,
+diffing against `config.options.base` (`'HEAD'` by default — every
+uncommitted change shows, staged or not). Diffing is Neovim's own
+`vim.diff()`, debounced. Sign-column markers: `+` added, `~` changed,
+`_`/`‾` deleted (configurable via `signs`).
+
+Keymaps (gutter, buffer-local) ~
+    ]c / ]g   and   [c / [g       Next/previous hunk (wrapping)
+    <leader>hs                    Stage the hunk under the cursor
+    <leader>hr                    Reset the hunk under the cursor
+    <leader>hp                    Preview the hunk under the cursor
+
+The status panel shows changed files and the current file's hunks, and
+opens three ways (all the same content, kept in sync):
+`mep.git.sidebar.toggle_dock()` (floating), `.toggle_split()` (real
+split), or the `git` panel in |mep-activitybar|. None steal focus on
+open.
+
+Keymaps (status panel) ~
+    <CR>          Open the file/hunk under the cursor
+    q              Close
+    R              Refresh
+    c              Compose a commit message (gitcommit-filetype buffer)
+    ZZ / ZQ        Commit / cancel the commit-message buffer
+    s / u          Stage / unstage the file under the cursor
+    X              Discard changes to the file under the cursor (confirms)
+
+>lua
+    require('mep.git').setup({}) -- enable=true, debounce_ms=200, base='HEAD', signs={...}, keymaps={...}, sidebar={...}
+    vim.keymap.set('n', '<leader>gg', function() require('mep.git').sidebar.toggle_split() end)
+    vim.keymap.set('n', '<leader>gG', function() require('mep.git').sidebar.toggle_dock() end)
+<
+(`<leader>gg`/`<leader>gG` are also bound directly by `setup()`.)
+
+Commands ~
+    :MepGitToggle          Toggle the docked panel.
+    :MepGitSplit            Toggle the split panel.
+    :MepGitPanel             Toggle the activitybar panel.
+
+No push/pull/branch/log support — this is a gutter and a status panel,
+not a full git client.
+
+Highlight groups ~
+    MepGitAdd / Change / Delete / ChangeDelete     linked to Diff* groups
+
+==============================================================================
+mep.window                                                        *mep-window*
+
+Two independent pieces: a manual layout (`mep.window.panes`, on by
+default) — recursive splits where each pane can hold several buffers as
+"tabs" via its own `winbar` — and automatic layouts (`mep.window.auto`)
+that rebuild the current tabpage's windows into a shape once, on demand.
+
+Manual layout keymaps ~
+    <Mod1-v> / <Mod1-s>            Split side-by-side / stacked
+    <Mod1-n> / <Mod1-p>            Cycle a pane's active tab (also
+                                    <Mod1-Tab>/<Mod1-S-Tab>)
+    <Mod1-h/j/k/l>                 Focus nearest pane by direction
+    <Mod1-S-h/j/k/l>               Resize current pane that way
+    <Mod1-C-h/j/k/l>               Move pane's active tab to the
+                                    neighboring pane, focus follows
+    <Mod1-d>                       Remove active tab from current pane
+
+>lua
+    require('mep.window').setup({}) -- manual.enable=true, resize_step=3, auto.mfact=0.55, auto.nmaster=1
+<
+Automatic layouts: `master_left`/`master_right`/`master_top`/
+`master_bottom`, `vertical`/`horizontal`, `square`, `spiral`. No default
+keymaps — reachable as `:MepWindowLayout {name}` or
+`require('mep.window').auto.apply(name)`.
+
+Commands ~
+    :MepWindowLayout {name}       Rebuild the tabpage into an automatic
+                                   layout (tab-completes).
+
+>lua
+    require('mep.window').setup({ auto = { keymaps = { square = { '<leader>wq' } } } })
+<
+Applying an automatic layout turns off `'equalalways'` globally for the
+rest of the session — `:set equalalways` opts back in.
+
+==============================================================================
+mep.chrome                                                        *mep-chrome*
+
+One shared "widget" shape drives four independently opt-in targets —
+`{ enable = false }` by default for `winbar`/`statuscolumn`.
+`statusline`/`tabline` are on by default: `statusline` draws a plain
+blank separator; `tabline` shows a mode indicator, one clickable circle
+per tabpage, and `+`/`x` to open/close a tab.
+
+>lua
+    require('mep.chrome').setup({
+      statusline = {
+        enable = true,
+        widgets = {
+          { text = function(ctx) return vim.api.nvim_buf_get_name(ctx.bufnr) end, hl = 'Directory' },
+          '%=',
+          {
+            text = function(ctx) return ctx.active and '●' or '○' end,
+            hl = function(ctx) return ctx.active and 'DiagnosticOk' or 'Comment' end,
+            on_click = function(ctx) vim.notify('clicked window ' .. ctx.win) end,
+          },
+        },
+      },
+      winbar = { enable = true, widgets = { { text = 'WB' } } },
+      tabline = { enable = true, widgets_before = {}, widgets_after = {} },
+      statuscolumn = { enable = true },
+    })
+<
+A widget is `{ text, hl, on_click, on_hover, on_leave }` — `text`/`hl`
+can be plain values or `function(ctx)`. `ctx` is `{ win, bufnr, active }`.
+
+>lua
+    require('mep.chrome').setup({ border = { enable = true } }) -- the default
+<
+The active window's border (magenta by default, `MepChromeBorderActive`)
+remaps real window options (`WinSeparator`/`WinBar`/`StatusLine`), so it
+stays compatible with a real statusline/winbar. On by default and useful
+even with every other target left off.
+
+==============================================================================
+mep.project                                                      *mep-project*
+
+A |mep-picker|-backed picker over a JSON-persisted list of directories.
+
+>lua
+    require('mep.project').picker() -- or :MepProjects
+<
+- `<C-a>` (`config.options.keymaps.add`) adds the current working
+  directory to the list — the only way in.
+- `<C-d>` (`config.options.keymaps.delete`) removes the selected project
+  from the list (nothing on disk is touched).
+- Picking one `cd`s into it, then opens its README
+  (`config.options.readme_names`, default
+  `{'README.org', 'README.md'}`) if it has one.
+- Also sets up `mep.filetree` rooted there
+  (`config.options.open_filetree`, on by default) and a `:terminal`
+  below the README (`config.options.open_terminal`, on by default,
+  `config.options.terminal_height_ratio` default `0.3`).
+- Persisted to `config.options.persist_path` (default
+  `stdpath('data') .. '/mep_projects.json'`).
+
+Commands ~
+    :MepProjects           Open the project picker.
+
+>lua
+    require('mep.project').setup({ readme_names = { 'readme.txt' } })
+    require('mep.project').setup({ open_terminal = false })
+    require('mep.project').setup({ terminal_height_ratio = 0.2 })
+    require('mep.project').add('/path/to/project')
+<
+
+==============================================================================
+mep.ai                                                                *mep-ai*
+
+gptel-style LLM streaming and a tool-calling agent, in any buffer.
+`:MepAiSend` (`gl` in normal mode) sends the whole current buffer's text
+to a configured LLM and streams the response in at the cursor.
+`:MepAiCancel` (`<leader>ax`) stops an in-flight request early.
+
+`gl`/`gk` in **visual** mode open a persistent side-panel, interactive,
+multi-turn, tool-calling agent (`mep.ai.agent`) scoped to the selection.
+`gk` first prompts for an explicit instruction. `mep.ai.send_selection()`
+(`:MepAiSendSelection`/`:MepAiSendSelectionPrompt`) is an older,
+single-shot, no-tools version that replaces the selection directly.
+
+>lua
+    require('mep.ai').setup({}) -- provider={'openai','anthropic','ollama'}, keymaps: send/agent={'gl'}, agent_prompt={'gk'}, cancel={'<leader>ax'}
+    require('mep.ai').setup({ provider = 'anthropic' })
+    require('mep.ai').setup({ provider = { 'anthropic', 'ollama' } })
+    require('mep.ai').setup({ system_prompt = 'Answer tersely.' })
+    require('mep.ai').setup({ tools = { 'read_file', 'list_dir' } }) -- drop run_command
+<
+Three named `providers` presets: `openai` (Chat Completions API,
+`OPENAI_API_KEY`, `model='gpt-4o-mini'`), `anthropic` (Messages API,
+`ANTHROPIC_API_KEY`, `max_tokens=4096`, `model='claude-sonnet-5'`), and
+`ollama` (local `ollama serve`, no key, `model='llama3.2'`). `provider`
+can be a single name (prompts for its key) or a list tried in order with
+no prompting — the default list lands on `ollama` if neither API key is
+set, so `gl` works with zero `setup()` calls once `ollama serve` is
+running.
+
+Commands ~
+    :MepAiSend                          Send buffer to the LLM, stream at cursor.
+    :MepAiCancel                        Cancel an in-flight request/agent turn.
+    :MepAiSendSelection                 Replace a range with the LLM's response (range).
+    :MepAiSendSelectionPrompt            Same, prompts for extra instructions first (range).
+    :MepAiAgent                          Start the tool-calling agent panel (range).
+    :MepAiAgentPrompt                    Same, prompts for extra instructions first (range).
+    :MepAiSetKey [provider]              Prompt for and cache an API key.
+
+Tool-calling agent (visual-mode gl/gk) ~
+Three tools ship by default (`config.tools`): `read_file`/`list_dir`
+(`risk = 'read'`), `run_command` (`risk = 'exec'`, `sh -c`). Every tool
+call is a permission prompt in the panel: `a` allows once, `d` denies,
+`A` grants a standing "always allow" approval — but only for `risk =
+'read'` tools; `run_command` always asks. `i` types a free-text reply.
+There is deliberately no dedicated "edit the buffer" tool — edits happen
+via a real shell command against the file on disk, picked back up by
+Neovim's own `:checktime` semantics. Tool-calling requests are
+non-streaming.
+
+==============================================================================
+mep.scratch                                                      *mep-scratch*
+
+A single, persistent throwaway notepad buffer.
+
+Commands ~
+    :MepScratch          Switch the current window to the scratch
+                          buffer, creating it the first time.
+                          Lua: require('mep.scratch').open()
+
+Unlike `:enew`'s own buffer, this one is real (`buftype=nofile`,
+`swapfile=false`, never touches disk) but reused across every `open()`
+call (`bufhidden=hide`), so its content survives switching away and
+back.
+
+>lua
+    require('mep.scratch').setup({}) -- name='scratch', filetype=''
+    require('mep.scratch').setup({ filetype = 'markdown' })
+<
+`require('mep.scratch').reset()` discards the current scratch buffer so
+the next `open()` starts fresh.
+
+==============================================================================
+mep.symbols                                                      *mep-symbols*
+
+A single persistent panel (like |mep-filetree|, only one at a time)
+showing whatever the attached LSP client reports for
+`textDocument/documentSymbol` — classes, methods, functions, variables,
+enums. No client attached, or one that doesn't support the method, shows
+a message instead of erroring.
+
+Splits the current window itself (`<leader>ll` by default), sized to
+`config.options.width_ratio` (a quarter by default) of that window's
+width, on the right — since it's tied to one specific buffer's symbols.
+`<CR>` on a symbol jumps to it; `R` re-requests symbols; a
+`BufWritePost` on that buffer does the same automatically.
+
+Commands ~
+    :MepSymbolsToggle           Open/close the outline for the current buffer.
+                                 Lua: require('mep.symbols').toggle()
+    :MepSymbolsRefresh          Re-request symbols for the open outline.
+                                 Lua: require('mep.symbols').refresh()
+
+Keymaps (inside the outline, normal mode) ~
+    <CR>          Jump to the symbol under the cursor
+    q / <Esc>     Close the outline
+    R             Refresh
+
+>lua
+    require('mep.symbols').setup({}) -- width_ratio=0.25, min_width=20, position='right', triggers.toggle={'<leader>ll'}
+    require('mep.symbols').setup({ position = 'left', width_ratio = 0.3 })
+    require('mep.symbols').setup({ triggers = { toggle = { '<leader>o' } } })
+<
+Configurable: `width_ratio`, `min_width`, `position` (`'left'`/
+`'right'`), `keymaps.jump`/`close`/`refresh`, and `triggers.toggle`.
+
+Highlight groups ~
+    MepSymbolsTitle         outline's winbar title (links to Title)
+    MepSymbolsKind           [KindName] tag on each symbol line (links to Comment)
+
+==============================================================================
+mep.hints                                                          *mep-hints*
+
+Jump-to-location hints, hop.nvim/flash.nvim-style — a pure Lua overlay
+(extmarks, no external dependency) that labels locations in the current
+window's visible lines and jumps the cursor there once you type the
+label. Two modes:
+
+- `require('mep.hints').char_search()` — prompts (blocking) for one
+  character, then labels every occurrence visible in the current window.
+- `require('mep.hints').word_start()` — labels every visible word start
+  immediately, no prompt.
+
+Zero matches just notifies; exactly one jumps straight there with no
+label shown; more than one overlays a label (from `config.options.labels`,
+home-row order by default) — single characters while the match count
+fits the charset, two-character combinations beyond that. `<Esc>`/
+`<C-c>`, or any key matching no label, cancels cleanly.
+
+>lua
+    require('mep.hints').setup({}) -- labels='asdfghjklqwertyuiopzxcvbnm', triggers.char/word unbound
+    require('mep.hints').setup({ triggers = { char = { 's' }, word = { 'w' } } }) -- hop.nvim's own bindings
+    require('mep.hints').setup({ labels = 'abcdefghijklmnopqrstuvwxyz' })
+<
+Both `triggers.char`/`triggers.word` are unbound by default.
+
+Highlight groups ~
+    MepHintMatch          matched span under a label (links to Search)
+    MepHintLabel            label glyph(s) overlaid on the match (links to ErrorMsg)
+
+==============================================================================
+mep.dap                                                              *mep-dap*
+
+A native Debug Adapter Protocol client — no external `nvim-dap`
+dependency. `mep.dap.client`/`mep.dap.protocol` speak DAP directly
+(`Content-Length`-framed JSON) over a spawned adapter process' own
+stdio.
+
+- `mep.dap.adapters` — a curated registry (`debugpy`/`lldb_dap`/
+  `netcoredbg`/`delve`, `{ cmd, filetypes }`). Adapter binaries are BYO.
+  Override per-adapter via `adapters = { <name> = { cmd = {...} } }`.
+- `mep.dap.breakpoints` — session-only, keyed by absolute file path.
+  `toggle(bufnr, lnum)`/`list(bufnr)`/`clear(bufnr)`/`clear_all()`;
+  sign-column gutter (`MepDapBreakpoint`).
+- `mep.dap.session` — one active session at a time: `launch(adapter_name,
+  args)`/`attach(...)` run the full DAP handshake;
+  `launch_interactive()` prompts for both. `continue`/`step_over`/
+  `step_into`/`step_out`/`terminate`/`evaluate(expression, callback)`
+  control it; `subscribe(fn)` hears every change.
+- `mep.dap.sidebar` — a `mep.sidebar`-built panel (call stack / scopes
+  / variables / breakpoints).
+- `mep.dap.repl` — a persistent console buffer for `output` events;
+  `evaluate_interactive()` prompts for an expression.
+
+>lua
+    require('mep.dap').setup({}) -- keymaps.toggle_breakpoint=<leader>db, continue=<leader>dc, ...
+    require('mep.dap').setup({ adapters = { debugpy = { cmd = { 'python', '-m', 'debugpy.adapter' } } } })
+    require('mep.dap').session.launch('debugpy', { program = '/path/to/script.py' })
+<
+Commands ~
+    :MepDapToggleBreakpoint       Toggle a breakpoint on the current line.
+    :MepDapLaunch                  Start a session (prompts for adapter + program).
+    :MepDapContinue                 Continue the active session.
+    :MepDapTerminate                 Terminate the active session.
+    :MepDapSidebar                    Toggle the debug sidebar.
+    :MepDapRepl                        Toggle the debug console.
+
+Highlight groups ~
+    MepDapBreakpoint         breakpoint gutter sign (links to DiagnosticError)
+    MepDapStopped              current-line sign where paused (links to DiagnosticWarn)
+    MepDapReplTitle              debug console's winbar title (links to Title)
+
+==============================================================================
+mep.docs                                                            *mep-docs*
+
+Docstring generation and external doc lookup.
+
+- `mep.docs.generate` (`<leader>ld`) — inserts a language-appropriate
+  doc-comment skeleton for the function on the cursor line. Tries a
+  real `textDocument/signatureHelp` request first when a capable client
+  is attached; falls back to a single-line regex scan otherwise.
+  Curated for python/lua/go/rust/ruby/javascript/typescript(react)/c/
+  cpp/java.
+- `mep.docs.lookup` (`<leader>lD`) — opens external documentation for
+  the word under the cursor via `mep.url.open`: a devdocs.io
+  instant-search deep link, biased toward the right doc set via a
+  per-filetype hint when curated.
+
+>lua
+    require('mep.docs').setup({}) -- keymaps.generate=<leader>ld, lookup=<leader>lD
+    require('mep.docs').setup({ doc_hints = { python = 'python~3.13' } })
+<
+Commands ~
+    :MepDocsGenerate       Insert a docstring skeleton for the current function.
+    :MepDocsLookup          Open external docs for the word under cursor.
+
+==============================================================================
+mep.flashcards                                                *mep-flashcards*
+
+Spaced-repetition review, org-drill style, over org headlines tagged
+`config.options.tag` (`:drill:` by default, inheritance-aware) collected
+across `config.options.drill_files` (the same literal-path/glob-pattern
+shape |mep-org|'s own `agenda_files` uses).
+
+- **Scheduling** (`mep.flashcards.sm2`) — the classic SM-2 algorithm, a
+  4-button grade vocabulary (again/hard/good/easy) mapped onto SM-2's
+  0-5 quality scale. State lives in the headline's own `:PROPERTIES:`
+  drawer.
+- **Review UI** (`:MepFlashcardsReview` /
+  `require('mep.flashcards').review_session()`, default `<leader>fr`) —
+  one card at a time in a floating popup: headline title as the
+  question, `<CR>`/`<Space>` reveals the body as the answer, then
+  `a`/`h`/`g`/`e` grades it and advances. A no-op (with a notification)
+  when nothing's due.
+
+>lua
+    require('mep.flashcards').setup({ drill_files = { '~/notes/*.org' } })
+    require('mep.flashcards').setup({ tag = 'flashcard' }) -- use :flashcard: instead of :drill:
+<
+>org
+    * Capital of France? :drill:
+    Paris.
+<
+Commands ~
+    :MepFlashcardsReview      Start a spaced-repetition review session.
+
+==============================================================================
+Building your own picker                                  *mep-custom-picker*
+
+`mep.picker.Picker` is the general engine; a "source" is just a table of
+opts describing where items come from. See
+`lua/mep/picker/sources/buffer_lines.lua` for the simplest example (a
+static list, fuzzy-filtered client-side) and `sources/grep.lua` for a
+dynamic one (the source does its own searching per keystroke via an
+async job).
+
+>lua
+    require('mep.picker').start({
+      prompt_title = 'My Picker',
+      items = { { name = 'foo' }, { name = 'bar' } }, -- or get_items = function(query, cb) ... end
+      entry_to_string = function(item) return item.name end,
+      preview = function(item, preview_buf, preview_win) ... end,
+      on_select = function(item) ... end,
+    })
+<
+
+==============================================================================
+Development                                                  *mep-development*
+
+- `just try` (or `nix run`, from outside a dev shell) — opens a scratch
+  Neovim with this checkout loaded and `setup({})` applied, isolated
+  from your real config. See `scripts/try_init.lua`.
+- `just test` — runs the busted unit test suite (needs a `nix develop`
+  shell). See `spec/README.md` for how it's wired up and its one real
+  constraint (no real subprocesses inside a spec).
 
 vim:tw=78:ts=8:noet:ft=help:norl:

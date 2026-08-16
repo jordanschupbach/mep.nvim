@@ -7,6 +7,27 @@
 --- back to default_file.
 local M = {}
 
+-- Small curated "UI action" icon set (bell/checkmark/play/branch/plus/
+-- trash, keyed by the call site's own semantic name rather than the
+-- glyph's shape — `mep.activitybar` is the concrete example each name
+-- traces back to: `notifications` (bell) and `todo` (checkmark) and
+-- `tests` (play) and `git` (branch) match its own bar-button `id`s
+-- directly, reused as-is for `tests`' own inline "Run tests" button
+-- since it's the very same glyph; `add`/`clear` are its todo panel's
+-- own Add/Clear-done buttons) — plain, already-universal symbols (only
+-- the bell and trash can are true full-color emoji codepoints) rather
+-- than font-dependent glyphs the way per-filetype icons are, so
+-- `nerd_font` and `emoji` reuse this same table unchanged; only `ascii`
+-- meaningfully differs (plain 7-bit fallbacks).
+local UI_ICONS = {
+  notifications = '🔔',
+  todo = '✓',
+  tests = '▶',
+  git = '⎇',
+  add = '+',
+  clear = '🗑',
+}
+
 -- Standard Unicode emoji. No special font required — this is the default
 -- style precisely because it looks reasonable everywhere.
 M.emoji = {
@@ -70,6 +91,7 @@ M.emoji = {
     LICENSE = '⚖️',
     ['.editorconfig'] = '🛠️',
   },
+  ui_icons = UI_ICONS,
 }
 
 -- Nerd Font (Private Use Area) codepoints. Per-language glyphs below are
@@ -141,6 +163,7 @@ M.nerd_font = {
     ['.editorconfig'] = '\u{e652}',
     LICENSE = '\u{e60a}',
   },
+  ui_icons = UI_ICONS,
 }
 
 -- Plain 7-bit ASCII: no per-type differentiation, just generic markers, so
@@ -153,6 +176,14 @@ M.ascii = {
   expand_marker_open = 'v',
   by_extension = {},
   by_filename = {},
+  ui_icons = {
+    notifications = '!',
+    todo = 'v',
+    tests = '>',
+    git = 'b',
+    add = '+',
+    clear = 'x',
+  },
 }
 
 return M
