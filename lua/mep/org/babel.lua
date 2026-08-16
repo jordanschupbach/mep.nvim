@@ -19,29 +19,59 @@
 --- opaque highlight span since that's a highlighting-only concern;
 --- mep.org.blockhl separately gives a src block a distinct background).
 ---
---- Compiled languages (currently C, C++, Rust, and Go) go through an
---- extra compile step: the block body is wrapped in each language's own
---- entry-point form (`int main() { ... }` for C/C++, `fn main() { ... }`
---- for Rust, `func main() { ... }` inside `package main` for Go), with
---- any `:includes` header-arg tokens prepended as that language's own
---- import form (`#include ...`, `use ...;`, or a quoted Go import), and
---- written to a temp source file, compiled to a temp binary, then that
---- binary is run — two chained `core.job.spawn` calls instead of the one
---- an interpreted language needs. The actual compile invocation is
---- `{ exe, source_path, '-o', binary_path }` (matching gcc/g++/rustc's
---- shared flag shape) unless the language def supplies its own
---- `compile_cmd(exe, source_path, binary_path)` — Go needs one, since
---- `go build`'s subcommand comes before its flags. A failed compile
---- reports the compiler's stderr the same way a failed run reports the
---- program's. A block that already writes its own entry point (real
---- org-babel-C's own convention, e.g. a self-contained example) opts out
---- of the auto-wrap with `:main no` (real org-babel's own header-arg
---- name); any other value, or the arg's absence, wraps as usual.
+--- Compiled languages (currently C, C++, Rust, Go, and Java) go through
+--- an extra compile step: the block body is wrapped in each language's
+--- own entry-point form (`int main() { ... }` for C/C++, `fn main() {
+--- ... }` for Rust, `func main() { ... }` inside `package main` for Go,
+--- `class Main { public static void main(String[] args) { ... } }` for
+--- Java), with any `:includes` header-arg tokens prepended as that
+--- language's own import form (`#include ...`, `use ...;`, a quoted Go
+--- import, or `import ...;`), and written to a temp source file,
+--- compiled to a temp binary, then that binary is run — two chained
+--- `core.job.spawn` calls instead of the one an interpreted language
+--- needs. The actual compile invocation is `{ exe, source_path, '-o',
+--- binary_path }` (matching gcc/g++/rustc's shared flag shape) unless
+--- the language def supplies its own `compile_cmd(exe, source_path,
+--- binary_path)` — Go needs one, since `go build`'s subcommand comes
+--- before its flags; Java needs one too, since `javac -d <dir>` doesn't
+--- produce a single executable at all (`binary_path` is reused as a
+--- *directory* of `.class` files instead — see `run_compiled_cmd`
+--- below). A failed compile reports the compiler's stderr the same way
+--- a failed run reports the program's.
+---
+--- The run step after a successful compile is `{ binary_path }` (just
+--- exec it directly) unless the language def supplies its own
+--- `run_compiled_cmd(binary_path)` — Java is the one language here that
+--- needs this: there's no single compiled artifact to exec, only a
+--- directory of `.class` files needing `java -cp <dir> Main`. The same
+--- override signals that `binary_path` is a directory, not a plain
+--- file, so cleanup uses a recursive delete for it specifically (every
+--- other compiled language's `binary_path` stays a single file, deleted
+--- the same way it always has been).
+---
+--- `:main` (real org-babel-C's own header-arg name) controls the
+--- entry-point wrap and defaults to *not* wrapping: a block's body is
+--- assumed to already be a self-contained program (the common case —
+--- pasting in a real, complete example) unless `:main yes` opts into
+--- wrapping bare statements in an entry-point function instead (a
+--- "scripting" block with no `main` of its own). `:main no` is still
+--- accepted explicitly (redundant with the default, but matches real
+--- org-babel-C's own spelling for "don't wrap"). PHP is the one
+--- exception (see `WRAP_MAIN_DEFAULT` below): its `wrap_main` adds the
+--- `<?php` tag every plain snippet needs to run as code at all, not an
+--- optional entry-point convenience, so it defaults the other way.
 ---
 --- Explicitly deferred, likely indefinitely (see ORGMODE_ROADMAP.md):
 --- persistent per-block sessions, and the rest of real org-babel's large
 --- header-argument surface (`:session`, `:noweb`, `:cache`, etc.) beyond
 --- `:results`, `:var`, and (C/C++ only) `:includes`.
+---
+--- Which languages get added here at all: a real LSP server *and* a
+--- real tree-sitter grammar both need to exist for it first (`mep.lsp.
+--- servers`/`mep.treesitter.parsers`, both curated registries this
+--- repo's own `flake.nix` devShell provisions toolchains/servers for) —
+--- babel execution for a language nobody could also get real editing
+--- support for isn't worth the maintenance surface on its own.
 local core = require('mep.core')
 
 local M = {}
@@ -91,6 +121,53 @@ local function wrap_go_main(includes, body_lines)
   return lines
 end
 
+--- `wrap_main` for Fortran: unlike every other entry-point language
+--- here, a Fortran "main program" needs no entry-point keyword or
+--- function at all — bare statements followed by a lone `end` *are*
+--- already a complete (unnamed) main program unit, real gfortran
+--- confirmed to accept exactly that. So this doesn't wrap the body in
+--- anything, just appends the `end` it's otherwise missing (`:includes`
+--- has no rendering here either, for the same reason C's own
+--- `wrap_in_main` skips it when there's nothing to prepend — Fortran's
+--- `use <module>` statements need their own physical line same as C's
+--- `#include`, with no legal way to fold into this function's own
+--- single appended line).
+---
+--- Execution-only, unlike the wrap in every other entry-point language:
+--- confirmed empirically that tree-sitter-fortran's own grammar (unlike
+--- C's) parses a bare statement with no `end` as one big `ERROR` node,
+--- not a normally-typed partial tree — since `queries/org/injections.scm`
+--- can only ever inject the block's own literal, unwrapped text (there's
+--- no tree-sitter mechanism to inject *this* function's output instead),
+--- a `:main yes` Fortran block loses syntax highlighting entirely, even
+--- though it still executes correctly. A self-contained block (this
+--- wrap's own default "no wrap" case) doesn't have this problem, since
+--- it's already valid, complete Fortran as typed.
+local function wrap_fortran_main(_, body_lines)
+  local lines = {}
+  vim.list_extend(lines, body_lines)
+  lines[#lines + 1] = 'end'
+  return lines
+end
+
+--- `wrap_main` for Scala: confirmed empirically (a bare `println(...)`
+--- run via `scala file.scala` — even a `.sc` "script" extension doesn't
+--- change this) that Scala 3 rejects top-level statements outside a
+--- real definition ("Illegal start of toplevel definition") — unlike
+--- C#'s own top-level-statements feature, there's no bare-file escape
+--- hatch here, so this wraps in an `@main def` the same way the other
+--- entry-point languages wrap in an entry-point function. Scala 3's
+--- significant-whitespace syntax (no `{ }` needed/wanted here) means the
+--- body has to be indented under its own `def` line, not just appended
+--- after it.
+local function wrap_scala_main(_, body_lines)
+  local lines = { '@main def run(): Unit =' }
+  for _, line in ipairs(body_lines) do
+    lines[#lines + 1] = '  ' .. line
+  end
+  return lines
+end
+
 --- `wrap_main` for PHP: unlike the other `wrap_main`s this isn't an
 --- entry-point function, just the leading `<?php` tag PHP needs to treat
 --- the file as code instead of raw HTML output (no matching `?>` — the
@@ -101,6 +178,118 @@ end
 local function wrap_php_tags(_, body_lines)
   local lines = { '<?php' }
   vim.list_extend(lines, body_lines)
+  return lines
+end
+
+--- `wrap_main` for Zig: unlike Nim/Crystal (which allow top-level
+--- executable statements directly, needing no wrap at all — see their
+--- own entries below), Zig only allows *declarations* at the top level;
+--- bare statements have to live inside a real function. `std` is always
+--- imported (`print_stmt` needs it regardless of whether the block uses
+--- it directly), with each `:includes` token imported the same way,
+--- bound to its own name — Zig's `@import` is itself an expression that
+--- has to be bound to something, unlike C's bare `#include` line.
+--- `main` returns `!void`, not plain `void`: writing to stdout always
+--- returns an error union, which `try` (used by `print_stmt` below, and
+--- needed by any self-contained body that writes to stdout itself)
+--- requires its enclosing function to propagate.
+---
+--- Zig 0.16's "Writergate" overhaul removed the old zero-setup
+--- `std.fs.File.stdout().deprecatedWriter()` path entirely — writing
+--- anything now needs an `Io` instance, only reachable (with no manual
+--- runtime setup) via a `main` that takes a `std.process.Init` parameter
+--- (`init.io`), confirmed empirically against a real zig 0.16 install.
+--- This wrap sets up the buffered `stdout` writer this now requires
+--- (`stdout_buffer`/`stdout_writer`/`const stdout = &stdout_writer.
+--- interface;`, the same idiom Zig's own 0.15 release notes document as
+--- the new canonical "hello world") and flushes it after the body runs
+--- — `print_stmt` below writes through this same `stdout`, so `:results
+--- value` (like `:var` + `:main yes` for Haskell — see
+--- `wrap_haskell_main`) only works together with `:main yes` here; a
+--- self-contained (`:main no`, the default) block needs to set up its
+--- own identically-named `stdout` for `print_stmt`'s call to resolve.
+local function wrap_zig_main(includes, body_lines)
+  local lines = { 'const std = @import("std");' }
+  for _, inc in ipairs(includes) do
+    lines[#lines + 1] = 'const ' .. inc .. ' = @import("' .. inc .. '");'
+  end
+  lines[#lines + 1] = 'pub fn main(init: std.process.Init) !void {'
+  lines[#lines + 1] = '  var stdout_buffer: [4096]u8 = undefined;'
+  lines[#lines + 1] = '  var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);'
+  lines[#lines + 1] = '  const stdout = &stdout_writer.interface;'
+  vim.list_extend(lines, body_lines)
+  lines[#lines + 1] = '  try stdout.flush();'
+  lines[#lines + 1] = '}'
+  return lines
+end
+
+--- `wrap_main` for Java: a deliberately *non*-`public` top-level class
+--- (`class Main`, not `public class Main`) — a `public` class' name has
+--- to match its source file's own basename exactly, which a random
+--- `vim.fn.tempname()` path never will; a package-private one has no
+--- such constraint, confirmed empirically (`javac -d <dir> <anything>.
+--- java` compiles a bare `class Main { ... }` from any filename just
+--- fine). `run_compiled_cmd` below always looks for `Main` specifically
+--- — a self-contained `:main no` block (the default) needs its own
+--- top-level class named exactly that for the same reason, documented
+--- there.
+local function wrap_java_main(includes, body_lines)
+  local lines = {}
+  for _, inc in ipairs(includes) do
+    lines[#lines + 1] = 'import ' .. inc .. ';'
+  end
+  lines[#lines + 1] = 'class Main {'
+  lines[#lines + 1] = '  public static void main(String[] args) {'
+  for _, line in ipairs(body_lines) do
+    lines[#lines + 1] = '    ' .. line
+  end
+  lines[#lines + 1] = '  }'
+  lines[#lines + 1] = '}'
+  return lines
+end
+
+--- `wrap_main` for D: like C's `wrap_in_main`, but D's own import form
+--- (`import x;`) and a `void main() { ... }` that needs no `return 0;`
+--- (a bare `void main()` is already a complete, valid entry point).
+--- `std.stdio` is always imported (`print_stmt`'s own `writeln` needs
+--- it regardless of whether a block uses it directly, same reasoning
+--- as Zig's `wrap_zig_main` always importing `std`); a duplicate
+--- `:includes std.stdio` is harmless — D tolerates importing the same
+--- module twice.
+local function wrap_d_main(includes, body_lines)
+  local lines = { 'import std.stdio;' }
+  for _, inc in ipairs(includes) do
+    lines[#lines + 1] = 'import ' .. inc .. ';'
+  end
+  lines[#lines + 1] = 'void main() {'
+  vim.list_extend(lines, body_lines)
+  lines[#lines + 1] = '}'
+  return lines
+end
+
+--- `wrap_main` for Haskell: unlike every other entry-point language
+--- here, bare IO statements can't just sit inside a `{ }`/indented
+--- block on their own — they have to be the right-hand side of a real
+--- top-level binding named `main`, in `do`-notation for more than one.
+--- `:includes` tokens become `import <token>` lines the same as
+--- anywhere else.
+---
+--- **Known limitation**: `M.languages.haskell.var_stmt` emits a bare
+--- top-level binding (`name = literal`, valid Haskell *outside* a
+--- `do`-block, the same form a self-contained `:main no` program needs)
+--- — combined with `:main yes` here, that binding ends up *inside* the
+--- `do` block this wraps everything in, where a bare (non-`let`)
+--- binding is a syntax error. `:var` and `:main yes` together isn't
+--- supported for Haskell as a result; either alone works fine.
+local function wrap_haskell_main(includes, body_lines)
+  local lines = {}
+  for _, inc in ipairs(includes) do
+    lines[#lines + 1] = 'import ' .. inc
+  end
+  lines[#lines + 1] = 'main = do'
+  for _, line in ipairs(body_lines) do
+    lines[#lines + 1] = '  ' .. line
+  end
   return lines
 end
 
@@ -163,16 +352,17 @@ M.languages = {
     print_stmt = function(expr)
       return string.format('std::cout << (%s) << std::endl;', expr)
     end,
-    -- The block body is bare statements (see org/test.org), not a full
-    -- translation unit by default — wrap it in `int main() { ... }`,
-    -- with each whitespace-separated token of the `:includes` header arg
-    -- (e.g. `:includes <iostream>`, real org-babel C++'s own header-arg
-    -- name) prepended as its own `#include` line. No `:includes` at all
-    -- means no `#include`s — same "user's responsibility" contract real
+    -- Wraps a bare-statement body in `int main() { ... }` when the block
+    -- sets `:main yes` (see `execute`) — the default assumes a
+    -- self-contained program instead, already defining its own `main`
+    -- (and its own `#include`s). When wrapping does happen, each
+    -- whitespace-separated token of the `:includes` header arg (e.g.
+    -- `:includes <iostream>`, real org-babel C++'s own header-arg name)
+    -- is prepended as its own `#include` line — no `:includes` at all
+    -- means no `#include`s, same "user's responsibility" contract real
     -- org-babel uses; a block relying on `:results value`'s implicit
-    -- `std::cout` without including `<iostream>` simply fails to compile.
-    -- Skipped entirely when the block sets `:main no` (see `execute`) for
-    -- a self-contained program that already defines its own `main`.
+    -- `std::cout` without including `<iostream>` simply fails to
+    -- compile.
     wrap_main = wrap_in_main,
   },
   c = {
@@ -199,6 +389,65 @@ M.languages = {
     end,
     print_stmt = function(expr)
       return string.format('puts(%s)', expr)
+    end,
+  },
+  -- `bun` (not `node`): a `.ts` file needs a real TypeScript-aware
+  -- runtime, not just Node's own JS-only one — `bun <file>` runs TS
+  -- directly, no separate compile step or project config needed, the
+  -- same "just an interpreter" shape every other language here has (see
+  -- `execute`'s non-`compiled` dispatch, a flat `{ exe, source_path }`
+  -- — unlike e.g. `deno run <file>`, `bun <file>` fits that as-is,
+  -- without `execute` needing a `run_cmd`-style hook the way `compiled`
+  -- languages get one for their own compiler's argument order).
+  typescript = {
+    executable = 'bun',
+    extension = '.ts',
+    var_stmt = function(name, literal)
+      return string.format('const %s = %s;', name, literal)
+    end,
+    print_stmt = function(expr)
+      return string.format('console.log(%s);', expr)
+    end,
+  },
+  -- `.exs` (Elixir *Script*), not `.ex`: the extension real `elixir
+  -- script.exs` expects for a file meant to run top-level statements
+  -- directly — `.ex` implies a compiled module context real org-babel
+  -- Elixir doesn't use for a plain code block either.
+  elixir = {
+    executable = 'elixir',
+    extension = '.exs',
+    var_stmt = function(name, literal)
+      return string.format('%s = %s', name, literal)
+    end,
+    print_stmt = function(expr)
+      return string.format('IO.puts(%s)', expr)
+    end,
+  },
+  julia = {
+    executable = 'julia',
+    extension = '.jl',
+    var_stmt = function(name, literal)
+      return string.format('%s = %s', name, literal)
+    end,
+    print_stmt = function(expr)
+      return string.format('println(%s)', expr)
+    end,
+  },
+  -- `bb` (Babashka, a fast-starting Clojure interpreter built for
+  -- exactly this "run a script" use case) first, falling back to the
+  -- full `clojure` CLI (JVM startup, much slower, but far more likely
+  -- to already be installed on a machine that already does Clojure
+  -- work) — both accept a bare `<exe> <file>` invocation, matching this
+  -- table's own "just an interpreter" shape.
+  clojure = {
+    executable = 'bb',
+    fallback_executable = 'clojure',
+    extension = '.clj',
+    var_stmt = function(name, literal)
+      return string.format('(def %s %s)', name, literal)
+    end,
+    print_stmt = function(expr)
+      return string.format('(println %s)', expr)
     end,
   },
   perl = {
@@ -234,9 +483,13 @@ M.languages = {
     print_stmt = function(expr)
       return string.format('echo (%s) . PHP_EOL;', expr)
     end,
-    -- Always applied (subject to the usual `:main no` opt-out) since a
+    -- Applied by default (`:main no` opts out, for a block that already
+    -- writes its own `<?php` tag) rather than needing `:main yes` like
+    -- the entry-point languages below — see `WRAP_MAIN_DEFAULT`. A
     -- `.php` file with no `<?php` tag at all is just static HTML output,
-    -- not executed code — see `wrap_php_tags` above.
+    -- not executed code, so there's no sensible "self-contained by
+    -- default" reading for PHP the way there is for a language whose
+    -- bare, tagless body can already be a complete program.
     wrap_main = wrap_php_tags,
   },
   rust = {
@@ -269,10 +522,299 @@ M.languages = {
     end,
     wrap_main = wrap_go_main,
   },
+  -- `.f90` (free-form modern Fortran), not `.f`/`.for` (old fixed-form,
+  -- with column-position rules gfortran still supports but real
+  -- org-babel Fortran examples never rely on).
+  fortran = {
+    executable = 'gfortran',
+    extension = '.f90',
+    compiled = true,
+    -- No `implicit none` emitted, so gfortran's own legacy implicit-
+    -- typing rules apply (a name starting `i`-`n` is an integer, every
+    -- other letter a real) unless the block's own body sets `implicit
+    -- none` first — same "minimal, not execution-accurate" tradeoff as
+    -- C's own `__auto_type`, just without a real equivalent to fall
+    -- back on (Fortran has no type-inferred declaration keyword at all).
+    var_stmt = function(name, literal)
+      return string.format('%s = %s', name, literal)
+    end,
+    print_stmt = function(expr)
+      return string.format('print *, %s', expr)
+    end,
+    wrap_main = wrap_fortran_main,
+  },
+  -- .NET's own "file-based apps" (`dotnet run <file>.cs` directly, no
+  -- `.csproj` needed — stable since .NET 10) combined with C# 9+'s own
+  -- top-level statements (a `Program.cs`-shaped file needs no `class`/
+  -- `Main` wrapper at all) means a bare-statement body is *already* a
+  -- complete, runnable program — unlike every other entry-point
+  -- language above, `csharp` has no `wrap_main`/`:main yes` story at
+  -- all, the same "nothing to wrap" shape `lua`/`python`/`ruby` have.
+  csharp = {
+    executable = 'dotnet',
+    extension = '.cs',
+    run_cmd = function(exe, source_path)
+      return { exe, 'run', source_path }
+    end,
+    var_stmt = function(name, literal)
+      return string.format('var %s = %s;', name, literal)
+    end,
+    print_stmt = function(expr)
+      return string.format('Console.WriteLine(%s);', expr)
+    end,
+  },
+  scala = {
+    executable = 'scala',
+    extension = '.scala',
+    var_stmt = function(name, literal)
+      return string.format('val %s = %s', name, literal)
+    end,
+    print_stmt = function(expr)
+      return string.format('println(%s)', expr)
+    end,
+    wrap_main = wrap_scala_main,
+  },
+  -- `zig run <file>` compiles and runs in one step — not `compiled =
+  -- true` here, since there's no separate binary artifact for `execute`
+  -- to manage the way c/cpp/rust/go/java need (see `run_cmd`, the same
+  -- "interpreter that needs a subcommand" hook `csharp`'s own `dotnet
+  -- run` uses). Needs `wrap_main` regardless, though: Zig only allows
+  -- declarations at its own top level, so a bare-statement block still
+  -- needs wrapping in a real `pub fn main()` unless it's already a
+  -- self-contained program (`:main no`, the default — same convention
+  -- as c/cpp/rust/go).
+  zig = {
+    executable = 'zig',
+    extension = '.zig',
+    run_cmd = function(exe, source_path)
+      return { exe, 'run', source_path }
+    end,
+    var_stmt = function(name, literal)
+      return string.format('const %s = %s;', name, literal)
+    end,
+    -- Not `std.debug.print` — that always writes to *stderr* (real Zig
+    -- convention: it's meant for debug output, confirmed empirically
+    -- that its own "Hello, world" never shows up in a block's captured
+    -- stdout at all). Writes through the `stdout` writer `wrap_zig_main`
+    -- sets up (see its own comment on why, post-0.16 "Writergate"); `{}`
+    -- is Zig's default formatter — covers the numeric/`:var`-bound
+    -- values a `:results value` block's own last expression typically
+    -- is, though a bare string slice needs `{s}` instead, which this
+    -- doesn't attempt to detect (the same "best-effort, not a real type
+    -- system" tradeoff `rust`'s own `{}` (`Display`) print_stmt already
+    -- makes).
+    print_stmt = function(expr)
+      return string.format('try stdout.print("{}\\n", .{%s});', expr)
+    end,
+    wrap_main = wrap_zig_main,
+  },
+  -- Nim, unlike Zig, allows bare executable statements directly at its
+  -- top level (`echo "hi"` alone *is* already a complete, runnable
+  -- program) — no `wrap_main` needed at all, the same "just an
+  -- interpreter" shape lua/python/ruby have, just with `run_cmd` since
+  -- `nim`'s own subcommand (`r`, compile-and-run) comes before the file
+  -- the way `dotnet run`/`zig run` do. `--hints:off`/`--warnings:off`
+  -- only quiet Nim's own compile-time chatter (stderr, never mixed into
+  -- a block's real stdout output either way) — purely cosmetic.
+  nim = {
+    executable = 'nim',
+    extension = '.nim',
+    run_cmd = function(exe, source_path)
+      -- Nim's compiler derives its own "module name" from the file's
+      -- basename (sans extension) and rejects one that isn't a valid
+      -- Nim identifier — confirmed empirically that `vim.fn.tempname()`
+      -- can land on a purely numeric basename ("invalid module name:
+      -- '1'"), even though nothing ever imports this file as a module.
+      -- Copy the already-written script to a sibling path with a valid
+      -- leading letter first, and run that instead — `execute`'s own
+      -- cleanup still only knows about (and deletes) the original
+      -- `source_path`, so this one extra small text file is left
+      -- behind, the same "compiler-cache-artifact" tradeoff `zig run`/
+      -- `crystal run`'s own build caches already aren't tracked/cleaned
+      -- either.
+      local valid_path = vim.fn.fnamemodify(source_path, ':h') .. '/m' .. vim.fn.fnamemodify(source_path, ':t')
+      vim.fn.writefile(vim.fn.readfile(source_path), valid_path)
+      return { exe, 'r', '--hints:off', '--warnings:off', valid_path }
+    end,
+    var_stmt = function(name, literal)
+      return string.format('let %s = %s', name, literal)
+    end,
+    print_stmt = function(expr)
+      return string.format('echo %s', expr)
+    end,
+  },
+  -- Crystal, like Nim (and Ruby, whose syntax it deliberately mirrors),
+  -- allows bare statements directly at its top level — no `wrap_main`.
+  -- `crystal run <file>` compiles and runs in one step, same "run_cmd,
+  -- not compiled" shape as `zig run`/`nim r` above.
+  crystal = {
+    executable = 'crystal',
+    extension = '.cr',
+    run_cmd = function(exe, source_path)
+      return { exe, 'run', source_path }
+    end,
+    var_stmt = function(name, literal)
+      return string.format('%s = %s', name, literal)
+    end,
+    print_stmt = function(expr)
+      return string.format('puts(%s)', expr)
+    end,
+  },
+  -- Java: a genuine two-step compile-then-run (`javac`, not a single-
+  -- command runner the way Zig/Nim/Crystal above are) — `compiled =
+  -- true`, with both `compile_cmd`/`run_compiled_cmd` overridden (see
+  -- this file's own header comment on why: `binary_path` is reused as a
+  -- *directory* of `.class` files, not a single executable). `executable
+  -- = 'javac'` (the compiler `M.resolve_executable` actually checks for
+  -- and `compile_cmd` invokes) rather than `'java'` (the separate
+  -- runtime `run_compiled_cmd` hardcodes) — a real JDK install always
+  -- ships both together, the same "assume the paired tool is there too"
+  -- convention `rust`'s own entry already makes for `cargo` (needed by
+  -- rust-analyzer, never checked by `execute` itself either).
+  java = {
+    executable = 'javac',
+    extension = '.java',
+    compiled = true,
+    compile_cmd = function(exe, source_path, binary_path)
+      return { exe, '-d', binary_path, source_path }
+    end,
+    -- Always looks for a top-level class named exactly `Main` — the one
+    -- `wrap_java_main` itself always emits; a self-contained `:main no`
+    -- block (the default) needs to name its own top-level class `Main`
+    -- too, for this to find it (`javac -d` doesn't care what a source
+    -- *file* is named, only what `java -cp` is later told to look for).
+    run_compiled_cmd = function(binary_path)
+      return { 'java', '-cp', binary_path, 'Main' }
+    end,
+    var_stmt = function(name, literal)
+      return string.format('var %s = %s;', name, literal)
+    end,
+    print_stmt = function(expr)
+      return string.format('System.out.println(%s);', expr)
+    end,
+    wrap_main = wrap_java_main,
+  },
+  -- Kotlin's own `.kts` *script* mode (not `.kt`, which needs a real
+  -- class/object context) allows bare top-level statements directly —
+  -- no `wrap_main` needed, the same "just an interpreter" shape lua/
+  -- python/ruby have. `kotlin <file>.kts` fits the plain `{ exe,
+  -- source_path }` shape `execute` already defaults to, no `run_cmd`
+  -- override needed either.
+  kotlin = {
+    executable = 'kotlin',
+    extension = '.kts',
+    var_stmt = function(name, literal)
+      return string.format('val %s = %s', name, literal)
+    end,
+    print_stmt = function(expr)
+      return string.format('println(%s)', expr)
+    end,
+  },
+  -- `runghc` (GHC's own script interpreter, no separate compile step)
+  -- — not `compiled = true`, same reasoning as `zig run`/`nim r`/
+  -- `crystal run` above. See `wrap_haskell_main`'s own comment for the
+  -- one real limitation here (`:var` + `:main yes` together).
+  haskell = {
+    executable = 'runghc',
+    extension = '.hs',
+    var_stmt = function(name, literal)
+      return string.format('%s = %s', name, literal)
+    end,
+    -- Haskell's built-in `print` is genuinely polymorphic (any `Show`
+    -- instance — covers every built-in numeric/string/list/tuple type),
+    -- a real universal print unlike most compiled languages here.
+    print_stmt = function(expr)
+      return string.format('print (%s)', expr)
+    end,
+    wrap_main = wrap_haskell_main,
+  },
+  -- OCaml's own toplevel, run as a script (`ocaml <file>.ml`) — allows
+  -- bare top-level `let`/expression phrases directly, no `wrap_main`
+  -- needed. No `print_stmt`: OCaml has no single universal print
+  -- expression (`Printf.printf` needs a format specifier matched to the
+  -- value's type, same "no `:results value` support" tradeoff `c`/`sh`
+  -- already make). Each top-level phrase needs its own trailing `;;` in
+  -- script mode — `var_stmt` supplies it for `:var` bindings; a `:main
+  -- no` self-contained block is the user's own responsibility to
+  -- terminate correctly, same as every other language's own body text.
+  ocaml = {
+    executable = 'ocaml',
+    extension = '.ml',
+    var_stmt = function(name, literal)
+      return string.format('let %s = %s;;', name, literal)
+    end,
+  },
+  -- D: a real two-step compile-then-run (`dmd`), unlike Zig/Nim/
+  -- Crystal/Kotlin above — `compiled = true`, with its own `compile_cmd`
+  -- since `dmd`'s output flag is one joined token (`-of=<path>`, no
+  -- space), not the shared `-o <path>` two-token shape gcc/g++/rustc
+  -- use. No `run_compiled_cmd` needed, unlike Java: `dmd` still produces
+  -- one plain executable, just named via a differently-shaped flag.
+  d = {
+    executable = 'dmd',
+    extension = '.d',
+    compiled = true,
+    -- Same fix as `M.languages.nim`'s own `run_cmd`, same root cause:
+    -- `dmd` derives its own module name from the file's basename (sans
+    -- extension) and rejects one that isn't a valid D identifier —
+    -- confirmed empirically ("module `3` has non-identifier characters
+    -- in filename") against a `vim.fn.tempname()` path that happened to
+    -- land on a purely numeric basename. Compile a valid-leading-letter
+    -- copy instead of the original — `execute`'s own post-compile
+    -- cleanup only ever deletes `source_path`, so (same as the Nim
+    -- case) this one extra small text file is left behind.
+    compile_cmd = function(exe, source_path, binary_path)
+      local valid_path = vim.fn.fnamemodify(source_path, ':h') .. '/m' .. vim.fn.fnamemodify(source_path, ':t')
+      vim.fn.writefile(vim.fn.readfile(source_path), valid_path)
+      return { exe, valid_path, '-of=' .. binary_path }
+    end,
+    var_stmt = function(name, literal)
+      return string.format('auto %s = %s;', name, literal)
+    end,
+    -- `writeln` (from `std.stdio`, always imported by `wrap_d_main`)
+    -- is a real generic print — a variadic template accepting (and
+    -- correctly formatting) any built-in type, the same convenience
+    -- Haskell's `print`/Rust's `{}` (`Display`) already have.
+    print_stmt = function(expr)
+      return string.format('writeln(%s);', expr)
+    end,
+    wrap_main = wrap_d_main,
+  },
 }
 M.languages.bash = M.languages.sh
 M.languages.js = M.languages.javascript
 M.languages['c++'] = M.languages.cpp
+M.languages.ts = M.languages.typescript
+M.languages.cs = M.languages.csharp
+M.languages['c#'] = M.languages.csharp
+
+--- lang key (lowercased babel token, matching `M.languages` and
+--- `mep.org.lang.to_filetype`'s own output for these particular
+--- languages — they coincide exactly, so this same table doubles as a
+--- filetype lookup for `mep.org.polyglot`'s shadow buffers) -> which way
+--- `:main`'s absence defaults for a `wrap_main`-having language. Every
+--- entry-point language (c/cpp/rust/go) defaults to `'no'` (assume a
+--- self-contained program); PHP is the sole exception, defaulting to
+--- `'yes'` (see its own `wrap_main` comment above for why).
+local WRAP_MAIN_DEFAULT = {
+  php = 'yes',
+}
+M.WRAP_MAIN_DEFAULT = WRAP_MAIN_DEFAULT
+
+--- Whether a `wrap_main`-having language's block should actually be
+--- wrapped: an explicit `:main yes`/`:main no` always wins, otherwise
+--- falls back to `WRAP_MAIN_DEFAULT[lang_key]` (itself defaulting to
+--- `'no'` for anything not listed there). `lang_key` is the lowercased
+--- babel language token (`block.lang:lower()`) for `M.execute`'s own
+--- call, or the shadow buffer's filetype for `mep.org.polyglot`'s —
+--- see this table's own comment for why the same key works for both.
+function M.should_wrap_main(lang_key, args)
+  local main = args.main
+  if main == 'yes' or main == 'no' then
+    return main == 'yes'
+  end
+  return (WRAP_MAIN_DEFAULT[lang_key] or 'no') == 'yes'
+end
 
 --- The executable actually found on PATH for `lang_def` (trying
 --- `fallback_executable` if the primary one isn't there), or nil if
@@ -440,8 +982,12 @@ end
 --- `#+RESULTS:` block sitting immediately after `after_lnum` (no blank
 --- line tolerance — matching how `insert_or_update_results` always
 --- writes one, so its own output is always found again next time), or
---- nil if there isn't one there.
-local function existing_results_span(bufnr, after_lnum)
+--- nil if there isn't one there. Exported (rather than the `M.find_blocks`-
+--- style whole-buffer scanner every other span-finder here uses) since a
+--- results block only ever makes sense relative to *some* preceding line
+--- — `M.find_results` below is the whole-buffer counterpart, built on top
+--- of this one.
+function M.existing_results_span(bufnr, after_lnum)
   local lines = vim.api.nvim_buf_get_lines(bufnr, after_lnum, after_lnum + 3, false)
   if not lines[1] or not lines[1]:match(RESULTS_PATTERN) then
     return nil
@@ -467,12 +1013,53 @@ end
 --- there if present.
 function M.insert_or_update_results(bufnr, end_lnum, output_lines)
   local new_lines = M.render_results(output_lines)
-  local start_lnum, span_end = existing_results_span(bufnr, end_lnum)
+  local start_lnum, span_end = M.existing_results_span(bufnr, end_lnum)
   if start_lnum then
     vim.api.nvim_buf_set_lines(bufnr, start_lnum - 1, span_end, false, new_lines)
   else
     vim.api.nvim_buf_set_lines(bufnr, end_lnum, end_lnum, false, new_lines)
   end
+end
+
+--- Every `#+RESULTS:` block in `bufnr`, wherever it sits (not just ones
+--- immediately following a src block this project itself just ran —
+--- real org-babel's own `#+RESULTS:` blocks written by Emacs, or by
+--- hand, count the same): a list of `{ start_lnum, end_lnum }` (1-
+--- indexed, inclusive), covering the `#+RESULTS:` line itself through
+--- whichever of `M.existing_results_span`'s three shapes follows it
+--- (nothing more, a one-line `: value`, or a `#+begin_example ...
+--- #+end_example` block). Used by `mep.org.resultshl` to paint every
+--- results block's background, independent of any specific src block.
+function M.find_results(bufnr)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local results = {}
+  local lnum = 1
+  while lnum <= #lines do
+    if lines[lnum]:match(RESULTS_PATTERN) then
+      local start_lnum, end_lnum = M.existing_results_span(bufnr, lnum - 1)
+      results[#results + 1] = { start_lnum = start_lnum, end_lnum = end_lnum }
+      lnum = end_lnum + 1
+    else
+      lnum = lnum + 1
+    end
+  end
+  return results
+end
+
+--- The stderr line to surface in a failure notification: the first
+--- line, skipping any leading `# <package>` header — `go build`/`go
+--- run` always prints one of these (`# command-line-arguments` for a
+--- file compiled outside a module) before the actual error, so showing
+--- line 1 unconditionally would surface that header instead of anything
+--- useful. Falls back to the header itself if stderr has nothing else
+--- (e.g. the process wrote only that line, or nothing at all).
+local function first_error_line(stderr)
+  for _, line in ipairs(stderr) do
+    if not line:match('^#%s') then
+      return line
+    end
+  end
+  return stderr[1]
 end
 
 --- Execute the source block at `lnum` and write its output into a
@@ -482,8 +1069,9 @@ end
 --- accepts several space-separated flags at once, this project only
 --- distinguishes the value/output axis. A failed run (nonzero exit)
 --- still writes whatever stdout it produced, and separately warns via
---- `vim.notify` with the first line of stderr, so failures are visible
---- without being silently swallowed into an empty results block.
+--- `vim.notify` with the first substantive line of stderr (see
+--- `first_error_line`), so failures are visible without being silently
+--- swallowed into an empty results block.
 function M.execute(bufnr, lnum, on_done)
   local block = M.at_cursor(bufnr, lnum)
   if not block then
@@ -516,7 +1104,7 @@ function M.execute(bufnr, lnum, on_done)
   end
 
   local script_lines = build_script(lang_def, prelude, block.body, results_mode)
-  if lang_def.wrap_main and args.main ~= 'no' then
+  if lang_def.wrap_main and M.should_wrap_main(block.lang:lower(), args) then
     local includes = {}
     if args.includes then
       for inc in args.includes:gmatch('%S+') do
@@ -531,7 +1119,7 @@ function M.execute(bufnr, lnum, on_done)
   local function finish(code, stdout, stderr, failure_verb)
     if code ~= 0 then
       vim.notify(
-        'mep.org: babel ' .. failure_verb .. ' failed (' .. block.lang .. '): ' .. (stderr[1] or ('exit code ' .. code)),
+        'mep.org: babel ' .. failure_verb .. ' failed (' .. block.lang .. '): ' .. (first_error_line(stderr) or ('exit code ' .. code)),
         vim.log.levels.WARN
       )
     end
@@ -559,7 +1147,7 @@ function M.execute(bufnr, lnum, on_done)
         end
         local stdout, stderr = {}, {}
         core.job.spawn({
-          cmd = { binary_path },
+          cmd = lang_def.run_compiled_cmd and lang_def.run_compiled_cmd(binary_path) or { binary_path },
           on_stdout = function(line)
             stdout[#stdout + 1] = line
           end,
@@ -567,7 +1155,7 @@ function M.execute(bufnr, lnum, on_done)
             stderr[#stderr + 1] = line
           end,
           on_exit = function(run_code)
-            pcall(vim.fn.delete, binary_path)
+            pcall(vim.fn.delete, binary_path, lang_def.run_compiled_cmd and 'rf' or nil)
             finish(run_code, stdout, stderr, 'execution')
           end,
         })
@@ -578,7 +1166,13 @@ function M.execute(bufnr, lnum, on_done)
 
   local stdout, stderr = {}, {}
   core.job.spawn({
-    cmd = { exe, source_path },
+    -- Flat `{ exe, source_path }` unless the language def supplies its
+    -- own `run_cmd(exe, source_path)` — mirrors `compile_cmd`'s own
+    -- escape hatch above for a compiled language whose compiler wants
+    -- a subcommand before its arguments; some *interpreters* need
+    -- exactly the same thing (`dotnet run <file>`, unlike `lua
+    -- <file>`/`python3 <file>`'s own bare two-argument shape).
+    cmd = lang_def.run_cmd and lang_def.run_cmd(exe, source_path) or { exe, source_path },
     on_stdout = function(line)
       stdout[#stdout + 1] = line
     end,

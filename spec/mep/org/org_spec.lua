@@ -1095,6 +1095,82 @@ describe('mep.org.org', function()
     end)
   end)
 
+  describe('results block color highlight', function()
+    local resultshl = require('mep.org.resultshl')
+
+    it('is applied to results blocks in an activated buffer by default', function()
+      stub_install()
+      org.setup({ fold = false })
+
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_set_current_buf(buf)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '#+RESULTS:', ': 42' })
+      vim.bo[buf].filetype = 'org'
+
+      local ns = vim.api.nvim_create_namespace('mep_org_results_block')
+      local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, {})
+      assert.are.equal(2, #marks)
+    end)
+
+    it('is skipped entirely when results_block_highlight = false', function()
+      stub_install()
+      org.setup({ fold = false, results_block_highlight = false })
+
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_set_current_buf(buf)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '#+RESULTS:', ': 42' })
+      vim.bo[buf].filetype = 'org'
+
+      local ns = vim.api.nvim_create_namespace('mep_org_results_block')
+      assert.are.same({}, vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, {}))
+    end)
+
+    it('MepOrgResultsBlock resolves to a highlight group after setup', function()
+      stub_install()
+      org.setup({ fold = false })
+      assert.is_not_nil(vim.api.nvim_get_hl(0, { name = resultshl.hl_group }))
+    end)
+  end)
+
+  describe('headline color highlight', function()
+    local headlinehl = require('mep.org.headlinehl')
+
+    it('is applied to headlines in an activated buffer by default', function()
+      stub_install()
+      org.setup({ fold = false })
+
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_set_current_buf(buf)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '* one', '** two' })
+      vim.bo[buf].filetype = 'org'
+
+      local ns = vim.api.nvim_create_namespace('mep_org_headline')
+      local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, {})
+      assert.are.equal(2, #marks)
+    end)
+
+    it('is skipped entirely when headline_highlight = false', function()
+      stub_install()
+      org.setup({ fold = false, headline_highlight = false })
+
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_set_current_buf(buf)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '* one' })
+      vim.bo[buf].filetype = 'org'
+
+      local ns = vim.api.nvim_create_namespace('mep_org_headline')
+      assert.are.same({}, vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, {}))
+    end)
+
+    it('every MepOrgHeadlineN group resolves to a highlight group after setup', function()
+      stub_install()
+      org.setup({ fold = false })
+      for _, group in ipairs(headlinehl.hl_groups) do
+        assert.is_not_nil(vim.api.nvim_get_hl(0, { name = group }))
+      end
+    end)
+  end)
+
   describe('Phase 11/12 keymaps', function()
     local orig_input, orig_select
 

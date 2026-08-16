@@ -2,9 +2,9 @@
 --- libraries. `require('mep')` gives you `setup()` plus direct access to
 --- each library (`mep.core`, `mep.sanity`, `mep.dashboard`, `mep.icons`,
 --- `mep.filetree`, `mep.treesitter`, `mep.org`, `mep.markdown`, `mep.picker`,
---- `mep.whichkey`, `mep.sidebar`, `mep.activitybar`, `mep.lsp`,
---- `mep.completion`, `mep.url`, `mep.git`, `mep.window`, `mep.theme`,
---- `mep.chrome`, `mep.project`);
+--- `mep.whichkey`, `mep.sidebar`, `mep.notify`, `mep.activitybar`,
+--- `mep.lsp`, `mep.completion`, `mep.url`, `mep.git`, `mep.window`,
+--- `mep.theme`, `mep.chrome`, `mep.project`, `mep.ai`);
 --- libraries can equally be required and configured directly, e.g.
 --- `require('mep.picker').setup({ ... })`.
 local M = {}
@@ -16,7 +16,15 @@ local M = {}
 -- set by `sanity`'s own setup() — Neovim resolves `<leader>` in a
 -- keymap's lhs to the *current* mapleader at the point the mapping is
 -- defined, not when it's later pressed, so whichkey.setup() has to run
--- after sanity.setup() actually applies that option. `activitybar` is
+-- after sanity.setup() actually applies that option. `notify` is listed
+-- after `sidebar` for the same "reads the other library's options"
+-- reasoning (its own history panel is a `mep.sidebar.new(...)`
+-- instance) and *before* `activitybar`, since `activitybar.setup()`
+-- calls `mep.notify.install()` to hook `vim.notify` (its own
+-- notifications panel is just a view onto `mep.notify`'s entries now,
+-- not a separate hook of its own) — not strictly load-bearing either
+-- (`install()` doesn't read `mep.notify`'s own config), just consistent
+-- with "depended-upon library goes first". `activitybar` is
 -- listed after `sidebar` for the same "reads the other library's
 -- options" reasoning, though less strictly load-bearing: every
 -- `mep.sidebar.new(...)` call it makes fully specifies its own
@@ -37,7 +45,11 @@ local M = {}
 -- setup time, so it's simply added at the end. `project` has no
 -- ordering dependency either — it only ever touches `mep.picker` at
 -- `M.picker()` call time (via `require`), never at `setup()` time, so
--- it's simply added at the end too. `theme` is listed right
+-- it's simply added at the end too. `ai` has no ordering dependency
+-- either — it only ever touches the network from `M.send()`/`M.
+-- set_key()`, both explicit user actions, never at `setup()` time
+-- (whose only side effect is binding its own keymaps), so it's simply
+-- added last. `theme` is listed right
 -- after `sanity`,
 -- deliberately, for two reasons that both point the same direction:
 -- its own setup() (which applies a colorscheme by default,
@@ -62,6 +74,7 @@ local CONFIGURABLE_LIBRARIES = {
   'picker',
   'whichkey',
   'sidebar',
+  'notify',
   'activitybar',
   'lsp',
   'completion',
@@ -70,14 +83,16 @@ local CONFIGURABLE_LIBRARIES = {
   'window',
   'chrome',
   'project',
+  'ai',
 }
 
 --- opts: `{ theme = {...}, sanity = {...}, dashboard = {...}, icons =
 --- {...}, filetree = {...}, treesitter = {...}, org = {...}, markdown =
 --- {...}, picker =
---- {...}, whichkey = {...}, sidebar = {...}, activitybar = {...}, lsp =
+--- {...}, whichkey = {...}, sidebar = {...}, notify = {...}, activitybar
+--- = {...}, lsp =
 --- {...}, completion = {...}, url = {...}, git = {...}, window = {...},
---- chrome = {...}, project = {...} }` (all optional). Each sub-table is
+--- chrome = {...}, project = {...}, ai = {...} }` (all optional). Each sub-table is
 --- forwarded to that library's own `setup()`; see `mep.<name>.config.
 --- defaults` for each library's shape. Note: mep.treesitter's default
 --- `ensure_installed = true` means this can kick off background
@@ -118,6 +133,7 @@ local LAZY_LIBRARIES = {
   picker = true,
   whichkey = true,
   sidebar = true,
+  notify = true,
   activitybar = true,
   lsp = true,
   completion = true,
@@ -126,6 +142,7 @@ local LAZY_LIBRARIES = {
   window = true,
   chrome = true,
   project = true,
+  ai = true,
   version = true,
 }
 

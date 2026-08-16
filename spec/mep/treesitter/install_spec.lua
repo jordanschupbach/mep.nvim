@@ -15,17 +15,26 @@ local function mock_jobstart_capturing(sink)
 end
 
 describe('mep.treesitter.install', function()
-  local orig_jobstart, orig_executable, orig_language_add
+  local orig_jobstart, orig_executable, orig_language_add, orig_get_files
   local calls
 
   before_each(function()
     orig_jobstart = vim.fn.jobstart
     orig_executable = vim.fn.executable
     orig_language_add = vim.treesitter.language.add
+    orig_get_files = vim.treesitter.query.get_files
     calls = {}
     vim.fn.jobstart = mock_jobstart_capturing(calls)
     vim.fn.executable = function()
       return 1
+    end
+    -- Queries "already present" by default in every test below that
+    -- doesn't say otherwise, so `M.has_queries` (a second, independent
+    -- gate alongside `is_available`) doesn't change any existing test's
+    -- behavior — query-copying itself is covered by its own describe
+    -- block further down, which overrides this per test.
+    vim.treesitter.query.get_files = function()
+      return { '/fake/queries/highlights.scm' }
     end
   end)
 
@@ -33,6 +42,7 @@ describe('mep.treesitter.install', function()
     vim.fn.jobstart = orig_jobstart
     vim.fn.executable = orig_executable
     vim.treesitter.language.add = orig_language_add
+    vim.treesitter.query.get_files = orig_get_files
   end)
 
   describe('is_available', function()
@@ -46,6 +56,22 @@ describe('mep.treesitter.install', function()
         return nil, 'nope'
       end
       assert.is_false(install.is_available('whatever'))
+    end)
+  end)
+
+  describe('has_queries', function()
+    it('reflects vim.treesitter.query.get_files for a "highlights" query', function()
+      vim.treesitter.query.get_files = function(lang, query_name)
+        assert.are.equal('whatever', lang)
+        assert.are.equal('highlights', query_name)
+        return { '/some/path/highlights.scm' }
+      end
+      assert.is_true(install.has_queries('whatever'))
+
+      vim.treesitter.query.get_files = function()
+        return {}
+      end
+      assert.is_false(install.has_queries('whatever'))
     end)
   end)
 
@@ -190,6 +216,108 @@ describe('mep.treesitter.install', function()
         calls[2].opts.on_exit(1, 0)
         assert.is_false(result.ok)
         assert.matches('failed to load', result.err)
+      end)
+    end)
+
+    describe('query copying', function()
+      local config = require('mep.treesitter.config')
+      local orig_query_dir, scratch_dir
+
+      before_each(function()
+        orig_query_dir = config.options.query_dir
+        scratch_dir = vim.fn.tempname()
+        config.options.query_dir = scratch_dir
+      end)
+
+      after_each(function()
+        config.options.query_dir = orig_query_dir
+        pcall(vim.fn.delete, scratch_dir, 'rf')
+      end)
+
+      --- Simulates the clone actually landing a queries/ dir at `tmpdir`
+      --- (calls[1]'s own destination arg) — core.job.spawn is mocked
+      --- (see spec/README.md), so nothing real ever runs; the "clone"
+      --- has to be faked onto real disk for copy_queries' own real
+      --- filesystem calls to find anything.
+      local function fake_cloned_queries(lines)
+        local tmpdir = calls[1].cmd[#calls[1].cmd]
+        vim.fn.mkdir(tmpdir .. '/queries', 'p')
+        vim.fn.writefile(lines or { '(identifier) @variable' }, tmpdir .. '/queries/highlights.scm')
+        return tmpdir
+      end
+
+      it('fetches queries via a clone even when the parser is already available, without compiling', function()
+        vim.treesitter.language.add = function()
+          return true
+        end
+        vim.treesitter.query.get_files = function()
+          return {}
+        end
+
+        local result
+        install.install('json', function(ok, err)
+          result = { ok = ok, err = err }
+        end)
+
+        assert.are.equal(1, #calls)
+        assert.are.equal('git', calls[1].cmd[1])
+        local tmpdir = fake_cloned_queries()
+        calls[1].opts.on_exit(1, 0)
+
+        assert.are.equal(1, #calls) -- no compile step
+        assert.is_true(result.ok)
+        assert.are.same({ '(identifier) @variable' }, vim.fn.readfile(scratch_dir .. '/json/highlights.scm'))
+        assert.is_false(vim.fn.isdirectory(tmpdir) == 1) -- cleaned up
+      end)
+
+      it('copies queries/ alongside a freshly-compiled parser too', function()
+        vim.treesitter.language.add = function()
+          return nil, 'not available yet'
+        end
+        vim.treesitter.query.get_files = function()
+          return {}
+        end
+
+        install.install('json', function() end)
+        fake_cloned_queries({ '(pair) @field' })
+        calls[1].opts.on_exit(1, 0) -- clone
+        vim.treesitter.language.add = function()
+          return true
+        end
+        calls[2].opts.on_exit(1, 0) -- compile
+
+        assert.are.same({ '(pair) @field' }, vim.fn.readfile(scratch_dir .. '/json/highlights.scm'))
+      end)
+
+      it('does not touch query_dir when the cloned repo has no queries/ directory', function()
+        vim.treesitter.language.add = function()
+          return true
+        end
+        vim.treesitter.query.get_files = function()
+          return {}
+        end
+
+        install.install('json', function() end)
+        calls[1].opts.on_exit(1, 0) -- clone, no queries/ dir faked in
+
+        assert.are.equal(0, vim.fn.isdirectory(scratch_dir .. '/json'))
+      end)
+
+      it('does not re-clone at all when both the parser and its queries are already available', function()
+        vim.treesitter.language.add = function()
+          return true
+        end
+        vim.treesitter.query.get_files = function()
+          return { '/already/here/highlights.scm' }
+        end
+
+        local result
+        install.install('json', function(ok)
+          result = ok
+        end)
+
+        assert.is_true(result)
+        assert.are.equal(0, #calls)
       end)
     end)
   end)

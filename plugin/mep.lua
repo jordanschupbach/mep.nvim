@@ -29,6 +29,15 @@ local function set_highlights()
   vim.api.nvim_set_hl(0, 'MepDashboardLink', { link = 'Underlined', default = true })
   vim.api.nvim_set_hl(0, 'MepSidebarTitle', { link = 'Title', default = true })
   vim.api.nvim_set_hl(0, 'MepSidebarSectionHeader', { link = 'Statement', default = true })
+  -- mep.notify's own severity colors — toast borders/headers and
+  -- history-panel entries alike, all keyed by the same four groups so
+  -- overriding one recolors both. Linked to Neovim's own Diagnostic*
+  -- groups by default (same reasoning as MepGit*/MepWindowTab* above:
+  -- reapplied on every real `:colorscheme` change, not just once).
+  vim.api.nvim_set_hl(0, 'MepNotifyError', { link = 'DiagnosticError', default = true })
+  vim.api.nvim_set_hl(0, 'MepNotifyWarn', { link = 'DiagnosticWarn', default = true })
+  vim.api.nvim_set_hl(0, 'MepNotifyInfo', { link = 'DiagnosticInfo', default = true })
+  vim.api.nvim_set_hl(0, 'MepNotifyDebug', { link = 'DiagnosticHint', default = true })
   -- mep.git.gutter.enable() also defines these itself (so the gutter
   -- still looks right even without this plugin/ file — e.g. under the
   -- busted/nlua test harness, which never loads it) — repeated here too
@@ -49,6 +58,25 @@ local function set_highlights()
   -- `:colorscheme` change, same reasoning as every other Mep* group.
   vim.api.nvim_set_hl(0, 'MepChromeNormal', { link = 'StatusLine', default = true })
   vim.api.nvim_set_hl(0, 'MepChromeBorderActive', { fg = '#ff00ff', bold = true, default = true })
+  -- mep.org.blockhl/mep.org.resultshl also define these themselves (same
+  -- reasoning as the MepGit*/MepWindowTab* groups above) — but only when
+  -- an org buffer actually activates, which a `:colorscheme`/`mep.theme.
+  -- apply()` switch doesn't re-trigger on its own; without repeating them
+  -- here too, both groups would go undefined (wiped by `hi clear`, per
+  -- `mep.theme.engine.apply`'s own comment on why only centrally-listed
+  -- groups survive that automatically) the moment a *different* theme is
+  -- applied, until whatever org buffer is open gets reopened/re-set-up.
+  vim.api.nvim_set_hl(0, 'MepOrgSrcBlock', { link = 'CursorLine', default = true })
+  vim.api.nvim_set_hl(0, 'MepOrgResultsBlock', { link = 'Constant', default = true })
+  -- mep.org.headlinehl's own `M.LINKS`, repeated here for the same
+  -- ColorScheme-survival reason as the two lines just above — keep in
+  -- sync with that table by hand if it ever changes.
+  vim.api.nvim_set_hl(0, 'MepOrgHeadline1', { link = 'Function', default = true })
+  vim.api.nvim_set_hl(0, 'MepOrgHeadline2', { link = 'Define', default = true })
+  vim.api.nvim_set_hl(0, 'MepOrgHeadline3', { link = 'String', default = true })
+  vim.api.nvim_set_hl(0, 'MepOrgHeadline4', { link = 'DiagnosticHint', default = true })
+  vim.api.nvim_set_hl(0, 'MepOrgHeadline5', { link = 'Keyword', default = true })
+  vim.api.nvim_set_hl(0, 'MepOrgHeadline6', { link = 'Type', default = true })
 end
 set_highlights()
 vim.api.nvim_create_autocmd('ColorScheme', {
@@ -111,7 +139,19 @@ end, { desc = 'mep.nvim: toggle the activity bar' })
 
 vim.api.nvim_create_user_command('MepNotifications', function()
   require('mep.activitybar').toggle_panel('notifications')
-end, { desc = 'mep.nvim: toggle the notifications panel' })
+end, { desc = 'mep.nvim: toggle the notifications panel (in the activity bar)' })
+
+vim.api.nvim_create_user_command('MepNotifyPanel', function()
+  require('mep.notify').toggle()
+end, { desc = 'mep.nvim: toggle the standalone notification history panel (independent of mep.activitybar)' })
+
+vim.api.nvim_create_user_command('MepNotifyClear', function()
+  require('mep.notify').clear()
+end, { desc = 'mep.nvim: clear all notification history' })
+
+vim.api.nvim_create_user_command('MepNotifyDismiss', function()
+  require('mep.notify').popup.dismiss_all()
+end, { desc = 'mep.nvim: dismiss every currently-visible notification popup (history is untouched)' })
 
 vim.api.nvim_create_user_command('MepTodo', function()
   require('mep.activitybar').toggle_panel('todo')
@@ -199,3 +239,63 @@ vim.api.nvim_create_user_command('MepTreesitterInstallAll', function()
     )
   end)
 end, { desc = 'mep.nvim: install every parser in the curated registry' })
+
+vim.api.nvim_create_user_command('MepAiSend', function()
+  require('mep.ai').send()
+end, { desc = 'mep.nvim: send the current buffer to the configured LLM, streaming the response in at the cursor' })
+
+vim.api.nvim_create_user_command('MepAiSendSelection', function(cmd_opts)
+  require('mep.ai').send_selection(cmd_opts.line1, cmd_opts.line2)
+end, {
+  range = true,
+  desc = 'mep.nvim: send the given line range to the LLM as an editing agent, replacing it in place (usable as :\'<,\'>MepAiSendSelection)',
+})
+
+vim.api.nvim_create_user_command('MepAiSendSelectionPrompt', function(cmd_opts)
+  require('mep.ai.popup').prompt('mep.ai: instructions', function(instructions)
+    require('mep.ai').send_selection(cmd_opts.line1, cmd_opts.line2, { instructions = instructions })
+  end)
+end, {
+  range = true,
+  desc = 'mep.nvim: like :MepAiSendSelection, but prompts for an extra instruction first',
+})
+
+vim.api.nvim_create_user_command('MepAiAgent', function(cmd_opts)
+  local scope = cmd_opts.range > 0 and { cmd_opts.line1, cmd_opts.line2 } or nil
+  require('mep.ai.agent').start({ scope = scope })
+end, {
+  range = true,
+  desc = 'mep.nvim: start the mep.ai tool-calling agent, opening its panel (usable as :\'<,\'>MepAiAgent to scope it to a range)',
+})
+
+vim.api.nvim_create_user_command('MepAiAgentPrompt', function(cmd_opts)
+  local scope = cmd_opts.range > 0 and { cmd_opts.line1, cmd_opts.line2 } or nil
+  require('mep.ai.popup').prompt('mep.ai: instructions', function(instructions)
+    require('mep.ai.agent').start({ scope = scope, instructions = instructions })
+  end)
+end, {
+  range = true,
+  desc = 'mep.nvim: like :MepAiAgent, but prompts for an extra instruction first',
+})
+
+vim.api.nvim_create_user_command('MepAiCancel', function()
+  local ai = require('mep.ai')
+  local agent = require('mep.ai.agent')
+  if ai.is_streaming() then
+    ai.cancel()
+  elseif agent.is_busy() then
+    agent.cancel()
+  else
+    vim.notify('mep.ai: nothing in flight', vim.log.levels.INFO)
+  end
+end, { desc = 'mep.nvim: cancel an in-flight mep.ai request (a plain stream or the current agent turn)' })
+
+vim.api.nvim_create_user_command('MepAiSetKey', function(cmd_opts)
+  require('mep.ai').set_key(cmd_opts.args ~= '' and cmd_opts.args or nil)
+end, {
+  nargs = '?',
+  complete = function()
+    return vim.tbl_keys(require('mep.ai').config.options.providers)
+  end,
+  desc = 'mep.nvim: prompt for and cache an API key for a mep.ai provider (default: the configured one)',
+})

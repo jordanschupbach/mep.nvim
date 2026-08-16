@@ -42,7 +42,18 @@ function M.apply(bufnr)
         end_row = lnum,
         hl_group = M.hl_group,
         hl_eol = true,
-        priority = 100,
+        -- `vim.highlight.priorities.treesitter` (100, confirmed via
+        -- `vim.inspect(vim.highlight.priorities)`) is the priority
+        -- `vim.treesitter.highlighter` itself uses for every capture —
+        -- `queries/org/highlights.scm`'s own `@markup.raw.block` capture
+        -- on this same span included. A plain `priority = 100` here
+        -- would only be an exact *tie* with that, not a guaranteed win
+        -- (confirmed empirically to lose against it for at least some
+        -- capture/theme combinations); `vim.highlight.priorities.user`
+        -- (200) is Neovim's own documented tier for exactly this "a
+        -- plugin wants to override syntax/treesitter highlighting for a
+        -- specific span" case.
+        priority = 200,
       })
     end
   end

@@ -53,6 +53,18 @@ M.registry = {
     url = 'https://github.com/tree-sitter/tree-sitter-ruby',
     files = { 'src/parser.c', 'src/scanner.c' },
   },
+  elixir = {
+    url = 'https://github.com/elixir-lang/tree-sitter-elixir',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  julia = {
+    url = 'https://github.com/tree-sitter/tree-sitter-julia',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  clojure = {
+    url = 'https://github.com/sogaiu/tree-sitter-clojure',
+    files = { 'src/parser.c' },
+  },
   c = {
     url = 'https://github.com/tree-sitter/tree-sitter-c',
     files = { 'src/parser.c' },
@@ -63,6 +75,14 @@ M.registry = {
   },
   c_sharp = {
     url = 'https://github.com/tree-sitter/tree-sitter-c-sharp',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  fortran = {
+    url = 'https://github.com/stadelmanma/tree-sitter-fortran',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  scala = {
+    url = 'https://github.com/tree-sitter/tree-sitter-scala',
     files = { 'src/parser.c', 'src/scanner.c' },
   },
   bash = {
@@ -109,6 +129,21 @@ M.registry = {
     files = { 'src/parser.c', 'src/scanner.c' },
     location = 'php',
   },
+  -- Not a real standalone filetype (nothing ever sets `filetype=
+  -- 'php_only'`) — the same repo's *other* grammar variant, parsing bare
+  -- PHP statements directly with no `<?php` tag required. `php`'s own
+  -- grammar requires one (a `.php` file with none is just static HTML —
+  -- real PHP semantics), which real code embedded in something else
+  -- (e.g. `mep.org.polyglot`'s own org-babel `#+begin_src php` blocks,
+  -- via `queries/org/injections.scm`) doesn't have and shouldn't need to
+  -- fake — confirmed empirically that unwrapped org-babel PHP body text
+  -- parses as a single opaque `(program (text))` under the regular `php`
+  -- grammar, giving a highlight query nothing to ever match.
+  php_only = {
+    url = 'https://github.com/tree-sitter/tree-sitter-php',
+    files = { 'src/parser.c', 'src/scanner.c' },
+    location = 'php_only',
+  },
   vim = {
     url = 'https://github.com/neovim/tree-sitter-vim',
     files = { 'src/parser.c', 'src/scanner.c' },
@@ -127,6 +162,35 @@ M.registry = {
   },
   org = {
     url = 'https://github.com/nvim-orgmode/tree-sitter-org',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  zig = {
+    url = 'https://github.com/tree-sitter-grammars/tree-sitter-zig',
+    files = { 'src/parser.c' },
+  },
+  nim = {
+    url = 'https://github.com/alaviss/tree-sitter-nim',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  crystal = {
+    url = 'https://github.com/crystal-lang-tools/tree-sitter-crystal',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  kotlin = {
+    url = 'https://github.com/fwcd/tree-sitter-kotlin',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  haskell = {
+    url = 'https://github.com/tree-sitter/tree-sitter-haskell',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
+  ocaml = {
+    url = 'https://github.com/tree-sitter/tree-sitter-ocaml',
+    files = { 'src/parser.c', 'src/scanner.c' },
+    location = 'grammars/ocaml',
+  },
+  d = {
+    url = 'https://github.com/gdamore/tree-sitter-d',
     files = { 'src/parser.c', 'src/scanner.c' },
   },
 }

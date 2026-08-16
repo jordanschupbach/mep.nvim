@@ -9,6 +9,7 @@ local treesitter_install = require('mep.treesitter.install')
 local org_config = require('mep.org.config')
 local whichkey_config = require('mep.whichkey.config')
 local sidebar_config = require('mep.sidebar.config')
+local notify_config = require('mep.notify.config')
 local activitybar_config = require('mep.activitybar.config')
 local lsp_config = require('mep.lsp.config')
 local completion_config = require('mep.completion.config')
@@ -18,6 +19,7 @@ local window_config = require('mep.window.config')
 local theme_config = require('mep.theme.config')
 local chrome_config = require('mep.chrome.config')
 local project_config = require('mep.project.config')
+local ai_config = require('mep.ai.config')
 
 describe('mep (top-level setup fan-out)', function()
   local saved_leader,
@@ -31,6 +33,7 @@ describe('mep (top-level setup fan-out)', function()
     saved_org_options,
     saved_whichkey_options,
     saved_sidebar_options,
+    saved_notify_options,
     saved_activitybar_options,
     saved_lsp_options,
     saved_completion_options,
@@ -39,7 +42,8 @@ describe('mep (top-level setup fan-out)', function()
     saved_window_options,
     saved_theme_options,
     saved_chrome_options,
-    saved_project_options
+    saved_project_options,
+    saved_ai_options
   local orig_install_all, orig_install
   local orig_notify
   local orig_lsp_config, orig_lsp_enable, orig_diag_config
@@ -57,6 +61,7 @@ describe('mep (top-level setup fan-out)', function()
     saved_org_options = vim.deepcopy(org_config.options)
     saved_whichkey_options = vim.deepcopy(whichkey_config.options)
     saved_sidebar_options = vim.deepcopy(sidebar_config.options)
+    saved_notify_options = vim.deepcopy(notify_config.options)
     saved_activitybar_options = vim.deepcopy(activitybar_config.options)
     saved_lsp_options = vim.deepcopy(lsp_config.options)
     saved_completion_options = vim.deepcopy(completion_config.options)
@@ -66,6 +71,7 @@ describe('mep (top-level setup fan-out)', function()
     saved_theme_options = vim.deepcopy(theme_config.options)
     saved_chrome_options = vim.deepcopy(chrome_config.options)
     saved_project_options = vim.deepcopy(project_config.options)
+    saved_ai_options = vim.deepcopy(ai_config.options)
     orig_notify = vim.notify
 
     -- mep.git.setup()'s default enable=true attaches mep.git.gutter to
@@ -138,6 +144,7 @@ describe('mep (top-level setup fan-out)', function()
     org_config.options = saved_org_options
     whichkey_config.options = saved_whichkey_options
     sidebar_config.options = saved_sidebar_options
+    notify_config.options = saved_notify_options
     activitybar_config.options = saved_activitybar_options
     lsp_config.options = saved_lsp_options
     completion_config.options = saved_completion_options
@@ -147,15 +154,19 @@ describe('mep (top-level setup fan-out)', function()
     theme_config.options = saved_theme_options
     chrome_config.options = saved_chrome_options
     project_config.options = saved_project_options
+    ai_config.options = saved_ai_options
     treesitter_install.install_all = orig_install_all
     treesitter_install.install = orig_install
     require('mep.filetree').reset()
     require('mep.dashboard').reset() -- undo any auto-open autocmds this test registered
-    -- mep.activitybar.setup() hooks vim.notify (mep.activitybar.
-    -- notifications.install) and may have created (closed) bar/panel
-    -- mep.sidebar instances — both need a clean slate for later tests
-    -- and other spec files sharing this busted run.
+    -- mep.activitybar.setup() hooks vim.notify via mep.notify.install()
+    -- and may have created (closed) bar/panel mep.sidebar instances —
+    -- mep.notify._reset() undoes the hook (and any real toast popups a
+    -- test's own vim.notify() call left open); mep.activitybar._reset()
+    -- undoes its own bar/panel instances. Both need a clean slate for
+    -- later tests and other spec files sharing this busted run.
     require('mep.activitybar')._reset()
+    require('mep.notify')._reset()
     vim.notify = orig_notify
     vim.lsp.config = orig_lsp_config
     vim.lsp.enable = orig_lsp_enable
@@ -167,6 +178,12 @@ describe('mep (top-level setup fan-out)', function()
     -- mep.url.setup() binds real, global gx/gX keymaps.
     pcall(vim.keymap.del, 'n', 'gx')
     pcall(vim.keymap.del, 'n', 'gX')
+    -- mep.ai.setup() binds real, global send/cancel keymaps (`gl`/
+    -- `<leader>ax` by default) — same reasoning as every other library's
+    -- own global keymaps above; left unbound if a leaked mapping from an
+    -- earlier test already deleted them, hence `pcall`.
+    pcall(vim.keymap.del, 'n', 'gl')
+    pcall(vim.keymap.del, 'n', '<leader>ax')
     -- mep.treesitter.setup()/mep.org.setup()/mep.lsp.setup() each
     -- register a real, global autocmd (FileType/FileType/LspAttach); only
     -- a later setup() call clears its own (recreates the group with
@@ -336,7 +353,21 @@ describe('mep (top-level setup fan-out)', function()
     assert.are.same({ 'README.org', 'README.md' }, project_config.options.readme_names) -- untouched
   end)
 
-  it('setup({}) installs the activitybar notify hook', function()
+  it('forwards opts.ai to mep.ai.setup, deep-merged', function()
+    mep.setup({ ai = { provider = 'openai', providers = { openai = { model = 'gpt-4o-mini' } } } })
+    assert.are.equal('openai', ai_config.options.provider)
+    assert.are.equal('gpt-4o-mini', ai_config.options.providers.openai.model)
+    assert.are.equal('https://api.openai.com/v1/chat/completions', ai_config.options.providers.openai.endpoint) -- untouched
+  end)
+
+  it('forwards opts.notify to mep.notify.setup, deep-merged', function()
+    mep.setup({ notify = { position = 'bottom-left', max_entries = 50 } })
+    assert.are.equal('bottom-left', notify_config.options.position)
+    assert.are.equal(50, notify_config.options.max_entries)
+    assert.are.equal('rounded', notify_config.options.border) -- untouched
+  end)
+
+  it('setup({}) installs the mep.notify vim.notify hook', function()
     mep.setup({})
     assert.are_not.equal(orig_notify, vim.notify)
   end)
@@ -358,6 +389,7 @@ describe('mep (top-level setup fan-out)', function()
     assert.are.equal(require('mep.picker'), mep.picker)
     assert.are.equal(require('mep.whichkey'), mep.whichkey)
     assert.are.equal(require('mep.sidebar'), mep.sidebar)
+    assert.are.equal(require('mep.notify'), mep.notify)
     assert.are.equal(require('mep.activitybar'), mep.activitybar)
     assert.are.equal(require('mep.lsp'), mep.lsp)
     assert.are.equal(require('mep.completion'), mep.completion)
@@ -367,6 +399,7 @@ describe('mep (top-level setup fan-out)', function()
     assert.are.equal(require('mep.theme'), mep.theme)
     assert.are.equal(require('mep.chrome'), mep.chrome)
     assert.are.equal(require('mep.project'), mep.project)
+    assert.are.equal(require('mep.ai'), mep.ai)
     assert.are.equal(require('mep.version'), mep.version)
   end)
 end)

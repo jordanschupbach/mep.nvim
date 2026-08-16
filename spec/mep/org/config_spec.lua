@@ -48,6 +48,8 @@ describe('mep.org.config', function()
     -- dispatch instead (see mep.org.org's bind_keymaps).
     assert.are.same({}, config.defaults.keymaps.toggle_checkbox)
     assert.is_true(config.defaults.src_block_highlight)
+    assert.is_true(config.defaults.results_block_highlight)
+    assert.is_true(config.defaults.headline_highlight)
   end)
 
   it('has defaults for every Phase 1 keymap', function()

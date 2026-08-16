@@ -136,12 +136,13 @@ function M.disable_auto_open()
 end
 
 --- Configure mep.activitybar (see mep.activitybar.config.defaults),
---- start capturing `vim.notify` calls into the notifications panel
---- (`mep.activitybar.notifications.install`, idempotent), and, unless
---- `auto_open = false`, register the startup autocmd.
+--- start capturing `vim.notify` calls (`mep.notify.install`, idempotent
+--- — `mep.activitybar.notifications` is just a `mep.sidebar` view onto
+--- that library's own entries, not a second hook of its own), and,
+--- unless `auto_open = false`, register the startup autocmd.
 function M.setup(opts)
   local options = config.setup(opts)
-  notifications.install()
+  require('mep.notify').install()
   if options.auto_open then
     M.enable_auto_open()
   else

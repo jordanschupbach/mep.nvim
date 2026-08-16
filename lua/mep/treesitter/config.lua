@@ -17,6 +17,17 @@ M.defaults = {
   -- that's already on 'runtimepath' by default (stdpath('data')/site),
   -- so installed parsers are found with no further setup.
   install_dir = vim.fn.stdpath('data') .. '/site/parser',
+  -- Where each installed parser's own upstream `queries/` directory
+  -- (highlights.scm/injections.scm/locals.scm — whatever its own repo
+  -- ships, copied over verbatim, the *reference* queries every curated
+  -- grammar's own maintainers publish alongside it) is copied to, so a
+  -- freshly-installed parser actually has something to highlight with —
+  -- a compiled grammar alone gives `vim.treesitter` a parse tree, not
+  -- colors. Same "already on runtimepath by default" reasoning as
+  -- `install_dir`, and deliberately the sibling `queries` directory
+  -- under the same `site/`, matching Neovim's own convention for where
+  -- `queries/<lang>/*.scm` is discovered.
+  query_dir = vim.fn.stdpath('data') .. '/site/queries',
 }
 
 M.options = vim.deepcopy(M.defaults)

@@ -3,8 +3,10 @@
 A zero-dependency Neovim plugin/distribution using a modular architecture of
 a collection of independent Lua libraries under one repo. No `plenary`, no
 `telescope`, no external Lua deps — only Neovim's built-in APIs plus, where a
-library chooses to shell out, standard CLI tools (currently: `rg`, and
-optionally `git` + a C compiler for `mep.treesitter`'s parser installer).
+library chooses to shell out, standard CLI tools (currently: `rg`,
+optionally `git` + a C compiler for `mep.treesitter`'s parser installer, and
+`curl` for `mep.ai`'s own LLM streaming — only needed if you actually use
+that library).
 
 Each library has a directory named after itself, with a single entry file
 of the same name that aggregates the pieces implemented in sibling files —
@@ -287,7 +289,7 @@ Two separate things, both on by default:
   installed by anything else. Pure `vim.treesitter` API, no network, no
   compiler — this part always works, on any OS.
 - **Installing** (`mep.treesitter.install`) — a curated registry of
-  ~27 common languages, including `org` for `mep.org`
+  ~40 common languages, including `org` for `mep.org`
   (`mep.treesitter.parsers`, verified against nvim-treesitter's own
   registry rather than hardcoded from memory, since several of these have
   moved GitHub orgs over time). Missing parsers are
@@ -301,7 +303,19 @@ Two separate things, both on by default:
   installed, activation still works for whatever's already available.
   This is genuinely a heavier default than any other mep library's
   `setup()` — see `treesitter = { ensure_installed = false }` below to
-  opt out and keep only activation.
+  opt out and keep only activation. Each install also copies that
+  grammar's own upstream `queries/` directory (highlights.scm and
+  whatever else it ships) to `stdpath('data')/site/queries/<lang>/`,
+  independently of the grammar itself — a *compiled* parser alone gives
+  `vim.treesitter` a parse tree, not colors; the query file is what
+  highlighting actually reads. Neovim bundles its own for a handful of
+  languages (c, lua, markdown, vim, vimdoc, query) and this project ships
+  its own hand-written one for `org` (`queries/org/highlights.scm` — see
+  its own header comment for why), but every other curated language gets
+  its query copied from its own grammar repo, the same reference query
+  every tree-sitter CLI/playground consumer uses. A language whose repo
+  ships no `queries/` directory at all just doesn't highlight, same
+  graceful-miss as everywhere else.
 
 ```lua
 require('mep.treesitter').setup({}) -- highlight=true, fold=false, ensure_installed=true (the curated list)
@@ -526,27 +540,60 @@ structure editing below works immediately, even before (or without) the
   `<C-c>e`/`<C-c>E` instead mirrors this project's own `narrow`/`widen`
   (`<C-c>n`/`<C-c>N`) convention: lowercase acts on the block at point,
   uppercase acts on the whole buffer. Supports `lua`/`python`/`sh`
-  (`bash`/`sh` alias)/`javascript` (`js` alias), each resolved to
-  whatever interpreter is actually on PATH (`python3` falling back to
-  `python`, `sh` falling back from `bash`) — an unavailable language
-  warns via `vim.notify` rather than erroring, the same graceful
-  degradation `mep.treesitter` uses for a missing C compiler. Header
-  args: `:var name=value` (repeatable) injects a prelude assignment
-  before the body in the target language's own syntax (a bare number
-  passes through as a literal, anything else becomes a quoted string —
-  scalars only, no org-table/list injection); `:results value` (vs. the
-  default `output`) treats the block's last non-blank line as an
-  expression and auto-prints it instead of running it as a plain
-  statement — a deliberate, documented simplification of real
-  org-babel's per-language value-capture machinery, and not meaningful
-  for shell (a shell script's output already *is* its value, so
-  `:results value` behaves like `output` there). A failed run still
-  writes whatever stdout it produced and separately warns with the
-  first line of stderr, so failures are visible without an empty
-  results block silently swallowing them. Explicitly deferred, likely
-  indefinitely: persistent per-block sessions, and the rest of real
-  org-babel's header-argument surface (`:session`, `:noweb`, `:cache`,
-  etc.) beyond `:results`/`:var`/`:tangle`.
+  (`bash`/`sh` alias)/`javascript` (`js` alias)/`typescript` (`ts` alias,
+  via `bun`)/`ruby`/`perl`/`R`/`php`/`elixir`/`julia`/`clojure` (via `bb`,
+  falling back to `clojure`)/`csharp` (`cs`/`c#` aliases, via `dotnet
+  run` — .NET's own "file-based apps" mode, no `.csproj` needed)/`nim`
+  (via `nim r`)/`crystal` (via `crystal run`)/`kotlin` (via `kotlin
+  <file>.kts` script mode)/`haskell` (via `runghc`)/`ocaml` (via the
+  `ocaml` toplevel, run as a script), plus the compiled languages
+  `c`/`c++` (`cpp` alias)/`rust`/`go`/`fortran`/`scala`/`zig` (via `zig
+  run` — no separate binary-management step, same as `nim`/`crystal`
+  above, but still needs `:main`'s entry-point wrapping, since Zig only
+  allows declarations at its own top level)/`java` (a real two-step
+  `javac`+`java`, the one language here where the "binary" `execute`
+  runs afterward is actually a directory of `.class` files, not a
+  single executable — see `mep.org.babel`'s own header comment)/`d`
+  (`dmd`, its own `-of=<path>` output flag needing a custom
+  `compile_cmd` the way Go's own `build -o` subcommand-before-flags
+  shape already does), each resolved to whatever interpreter or
+  compiler is actually on PATH
+  (`python3` falling back to `python`, `sh` falling back from `bash`) —
+  an unavailable language warns via `vim.notify` rather than erroring,
+  the same graceful degradation `mep.treesitter` uses for a missing C
+  compiler. Which languages get added here at all: a real LSP server
+  *and* a real tree-sitter grammar have to exist for it first (`mep.lsp.
+  servers`/`mep.treesitter.parsers` below) — this repo's own `flake.nix`
+  devShell provisions a toolchain/server for every one of them, purely
+  so trying a language out doesn't need anything installed globally.
+  Header args: `:var name=value` (repeatable) injects a
+  prelude assignment before the body in the target language's own
+  syntax (a bare number passes through as a literal, anything else
+  becomes a quoted string — scalars only, no org-table/list injection);
+  `:results value` (vs. the default `output`) treats the block's last
+  non-blank line as an expression and auto-prints it instead of running
+  it as a plain statement — a deliberate, documented simplification of
+  real org-babel's per-language value-capture machinery, and not
+  meaningful for shell (a shell script's output already *is* its value,
+  so `:results value` behaves like `output` there). For a compiled
+  language, `:includes` (e.g. `:includes <stdio.h>`, whitespace-
+  separated for more than one) prepends each token as that language's
+  own import form, and `:main yes` wraps the body in a minimal
+  entry-point (`int main() { ... }`/`fn main() { ... }`/`package main;
+  func main() { ... }`) for a block that's bare statements rather than a
+  complete program — the *default* (no `:main`, or an explicit `:main
+  no`) assumes the block is already a self-contained program, since
+  that's the common case for something worth pasting into a src block
+  (see `mep.org.polyglot`'s own section above for the identical `:main`
+  contract its shadow buffers use). A failed run still writes whatever
+  stdout it produced and separately warns with the first substantive
+  line of stderr — skipping a leading `# <package>` header `go build`
+  prints before the real error when compiling a file outside a module —
+  so failures are visible without an empty results block silently
+  swallowing them. Explicitly deferred, likely indefinitely: persistent
+  per-block sessions, and the rest of real org-babel's header-argument
+  surface (`:session`, `:noweb`, `:cache`, etc.) beyond `:results`/
+  `:var`/`:tangle`/`:includes`/`:main`.
 - **`mep.org.fold`** — a headline-depth `foldexpr`, used by the per-fold
   `<Tab>` toggle. Deliberately not the same as generic `mep.treesitter`
   folding: org's fold unit is the headline subtree (heading + body +
@@ -673,7 +720,19 @@ structure editing below works immediately, even before (or without) the
     by Neovim's own highlighter as soon as *any* `org` buffer highlights
     (`mep.treesitter` can trigger that on its own, without
     `mep.org.setup()` ever running), and an unregistered custom directive
-    is a hard error there, not a graceful no-op.
+    is a hard error there, not a graceful no-op. Since `mep.treesitter`'s
+    own `ensure_installed` only ever installs its curated registry as a
+    *whole* (or an explicit subset you name up front) — it has no way to
+    know an org file's src blocks are about to need `ruby`/`go`/etc — each
+    org buffer additionally installs (in the background, the same
+    `mep.treesitter.install` pipeline, a no-op for anything already
+    available) a parser for every language its own blocks actually use
+    (`mep.org.polyglot.ensure_language_parsers`), forcing a re-highlight
+    once each one lands. This is what actually makes highlighting work
+    out of the box even with `mep.treesitter.setup({ ensure_installed =
+    false })` (`scripts/try_init.lua`'s own choice, "too heavy for a quick
+    session") — a block in a language with no curated parser (`perl`, `R`)
+    still just doesn't highlight, same graceful miss as elsewhere.
   - **LSP** (real hover/definition/references/rename/diagnostics/manual
     completion, sourced from each language's own server while the cursor
     is inside its block) works by keeping one hidden real buffer per
@@ -686,7 +745,60 @@ structure editing below works immediately, even before (or without) the
     `mep.lsp` (or your own LSP config) already registered via `vim.lsp.
     enable` for that filetype attach on their own, through Neovim's
     normal `FileType` autostart — this module never launches a server
-    itself. `gd`/`gD`/`gr`/`gi`/`K`/`<C-k>`/`<leader>rn`/`[d`/`]d`/
+    itself, and (like `mep.lsp` itself) never installs one either: a
+    language with no server actually on `PATH` just gets no LSP features
+    inside its blocks, the same silent-until-you-install-it contract
+    `mep.lsp`'s own README section describes. On a system with nothing
+    globally on `PATH` by default (NixOS being the standing example — see
+    this repo's own `flake.nix` `devShells.default`, which lists a server
+    for every `mep.lsp.servers` entry precisely so `nix develop` gives you
+    a working poly-mode LSP session to try this in), that means *some*
+    project-local shell has to put the servers you want there yourself.
+    A shadow buffer also needs `vim.lsp.enable`'s autostart to consider it
+    at all, which — confirmed against Neovim's own source — flatly skips
+    any buffer whose `'buftype'` isn't empty or `'help'`; each shadow
+    buffer is therefore a real (`buftype=''`), never-actually-written-to-
+    disk buffer (`'modified'` force-cleared after every sync, a
+    `BufWriteCmd` autocmd no-ops any stray `:w`) rather than the more
+    obvious `'nofile'`, which would otherwise never get a client at all.
+    A compiled language's block body (C/C++/Rust/Go) *can* be bare
+    statements rather than a complete program — a shadow buffer's
+    language server would otherwise see top-level statements outside any
+    function for one of these (confirmed empirically against clangd on
+    exactly this shape: it doesn't just flag the bare call, it mis-parses
+    the whole thing as an implicit-`int`-return function declaration —
+    "type specifier missing, defaults to 'int'"). `:main yes` opts a
+    block into exactly that: real org-babel's own `:main` header-arg
+    wraps a bare-statement block at *execution* time only, and this same
+    flag drives the shadow buffer's equivalent, a minimal entry-point
+    wrapper (`int main(void) { ... return 0; }`/`fn main() { ... }`/
+    `package main; func main() { ... }`) added around it. The *default*
+    (no `:main` at all, or an explicit `:main no`) assumes the opposite —
+    a self-contained program that already defines its own entry point —
+    since that's the common case for a block worth pasting into a src
+    block at all; deliberately not execution-accurate either way (no
+    `:includes` handling: `#include`/Go's `import` need their own
+    physical line, with no legal way to share one with the wrapper) and,
+    since a shadow buffer merges every block of one language into a
+    single file, limited to one wrapped (`:main yes`) block per language
+    per org file — a second one collides on the entry point, the same
+    "only one real program at a time" constraint real org-babel's own
+    execution model already has. Two servers
+    specifically (confirmed empirically) need more than a client
+    attaching to make any of this work at all: rust-analyzer shells out to
+    `cargo metadata`/`cargo check` for its own workspace discovery, and
+    gopls behaves the same way for `go.mod` — a client attaches fine
+    either way, but every feature silently returns nothing without one. A
+    real `Cargo.toml`/`go.mod` (declaring the shadow file as a `[[bin]]`
+    where that's needed) is written next to the shadow buffer's own path
+    the first time it's created, and — the one exception to shadow buffer
+    content never touching disk — that content is *also* mirrored to the
+    same real file on every sync, since `cargo check` validates the
+    on-disk path independently of whatever the LSP client already told it
+    about the open buffer. A blanket `.gitignore` (`*`) written alongside
+    keeps all of it out of your own repo; the whole `.mep-polyglot/`
+    scaffold directory is removed again when the org buffer closes.
+    `gd`/`gD`/`gr`/`gi`/`K`/`<C-k>`/`<leader>rn`/`[d`/`]d`/
     `<leader>le` (mirroring `mep.lsp`'s own keymap vocabulary) work
     inside a block using that language's client; outside of one, they
     fall through to whatever's attached to the org buffer itself
@@ -700,6 +812,26 @@ structure editing below works immediately, even before (or without) the
     `[d`/`]d`/`<leader>le` need no bridging at all. Set `polyglot = false`
     to turn this off entirely (highlighting is unaffected); `polyglot = {
     keymaps = {...} }` to rebind just the keymaps.
+  - **Status widget** (`mep.org.polyglot.status_widget()`) — a
+    `mep.chrome`-shaped widget (`{ text = function(ctx) ... end, hl =
+    'MepOrgPolyglotStatus' }`, linked to `ModeMsg` by default) showing the
+    language of the src block at the cursor (` python `, ` rust `, ...),
+    live-updated (a `CursorMoved`/`CursorMovedI` autocmd calls
+    `:redrawtabline`, only when the reported language actually changes)
+    and empty outside an org buffer or outside any block. Not wired into
+    any tabline/statusline automatically — `mep.chrome` has no awareness
+    of `mep.org` (or any other library), the same independence every pair
+    of mep libraries keeps — compose it into your own config:
+    ```lua
+    require('mep.chrome').setup({
+      tabline = {
+        widgets_after = vim.list_extend(
+          { require('mep.org.polyglot').status_widget() },
+          require('mep.chrome.config').defaults.tabline.widgets_after
+        ),
+      },
+    })
+    ```
 
 ```lua
 require('mep.org').setup({}) -- todo_keywords={'TODO','DONE'}, highlight=true, fold=true, sort_criteria='alpha', priorities={'A','B','C'}, tags={}, tags_column=77, conceal_links=true, capture_templates={}, agenda_files={}, deadline_warning_days=14, attach_dir='data', polyglot={keymaps={...}}
@@ -969,6 +1101,62 @@ character-grid terminal UI gets, not pixel-smooth. Custom fonts aren't
 attempted at all — that's a terminal-level concern outside what any
 Neovim plugin can control.
 
+### `mep.notify` — nvim-notify/noice-style toast popups, plus a dismissible history panel
+
+Hooks `vim.notify` itself (`setup()` installs this automatically), so
+any notification from anywhere — this project's own libraries, your
+own config, another plugin — shows up without any extra wiring, the
+same "introspect what's really there" approach `mep.whichkey` takes for
+keymaps. Every call becomes two things at once: a small, auto-
+dismissing **popup toast**, and a permanent entry in a scrollable
+**history panel** you can review and individually delete.
+
+Toasts stack in a screen corner (`config.position`, default
+`'top-right'`), newest closest to the corner, older ones pushed away as
+more arrive — capped at `config.max_visible` (default 5; past that, the
+oldest is closed immediately to make room, not queued). Each is colored
+and iconed by level (`MepNotifyError`/`Warn`/`Info`/`Debug` highlight
+groups, linked to Neovim's own `Diagnostic*` groups by default — plain
+Unicode glyphs `✗ ⚠ ℹ ·`, not Nerd Font codepoints, so they render
+correctly with no special font required) and auto-dismisses after
+`config.timeout[level]` ms — errors/warnings linger longer than routine
+info/debug noise by default. Reflows instantly (no gap left behind)
+whenever one closes, whether by timeout, `:MepNotifyDismiss`, or
+`config.max_visible` eviction.
+
+```lua
+require('mep.notify').setup({}) -- position='top-right', max_visible=5, max_entries=200
+require('mep.notify').setup({ position = 'bottom-left', max_width = 50 })
+require('mep.notify').setup({ timeout = { [vim.log.levels.INFO] = 2000 } }) -- shorter for routine info toasts
+```
+
+```vim
+:MepNotifyPanel     " toggle the standalone history panel
+:MepNotifyClear      " clear all notification history
+:MepNotifyDismiss     " dismiss every currently-visible toast (history untouched)
+```
+
+The history panel (`require('mep.notify').toggle()`, a `mep.sidebar`
+instance sized/positioned by its own `config.panel`, independent of
+`mep.activitybar`'s own sizing) lists every entry newest-first, colored
+the same way as its toast — click one (or press `d`/`x` on it) to
+dismiss just that entry, "Clear all" (or `C`) to empty the whole list.
+Capped at `config.max_entries` (default 200, oldest dropped first).
+
+`mep.activitybar`'s own notifications button (below) is just a second,
+differently-sized `mep.sidebar` view onto this exact same entry list —
+not a separate history or a second `vim.notify` hook — so dismissing an
+entry from either place removes it everywhere, the same "one shared
+data source, several attached sidebar views" pattern `mep.git`'s own
+dock/split/activitybar panel already uses.
+
+**Scope note**: no click-to-dismiss on the toasts themselves (they're
+`focusable = false`, purely transient) — only the history panel supports
+manual per-entry deletion. No message deduplication/merging (a "same
+error 50 times" spam scenario shows 50 toasts/entries, not one counter)
+— not attempted, matching this feature's actual ask over a fully
+general notification-management system.
+
 ### `mep.activitybar` — a notifications/todo/tests/git button bar, built on mep.sidebar
 
 A slim, persistent, icon-only button column (`config.position`, default
@@ -992,12 +1180,12 @@ either, a status panel you glance at rather than one that interrupts
 whatever you were typing. Switch into any of them (e.g. `<C-w>w`, or
 just click) to use their keymaps.
 
-- **Notifications** — hooks `vim.notify` itself (`setup()` installs
-  this automatically), so any notification from anywhere shows up
-  without extra wiring; colored by level via Neovim's own
-  `Diagnostic{Error,Warn,Info,Hint}` highlight groups. Click an entry to
-  dismiss it, or "Clear all" to empty the list. Capped at `config.
-  notifications.max_entries` (default 200, oldest dropped first).
+- **Notifications** — a view onto `mep.notify`'s own entry list (see
+  above), not a separate history of its own — `setup()` installs `mep.
+  notify`'s `vim.notify` hook, which also drives that library's own
+  popup toasts. Click an entry (or press `d`/`x`) to dismiss it, "Clear
+  all" (or `C`) to empty the list — from here or `mep.notify`'s own
+  standalone panel, since both show the same shared list.
 - **Todo** — "Add todo..." prompts via `vim.ui.input`; click an item to
   toggle it done (`[ ]`/`[x]`, done items dimmed via the `Comment`
   highlight group); "Clear done" removes every done item. Persisted as
@@ -1025,7 +1213,7 @@ require('mep.activitybar').setup({ auto_open = true }) -- show the bar automatic
 
 ```vim
 :MepActivityBarToggle   " toggle the button bar
-:MepNotifications       " toggle the notifications panel directly
+:MepNotifications       " toggle the notifications panel (in the activity bar; see also :MepNotifyPanel)
 :MepTodo                " toggle the todo panel directly
 :MepTests                " toggle the tests panel directly
 :MepTestsRun             " run tests without opening the panel first
@@ -1036,8 +1224,9 @@ Also reachable as plain functions for your own keymaps: `require('mep.
 activitybar').toggle_bar()`/`.toggle_panel('notifications' | 'todo' |
 'tests' | 'git')`, or drill into a specific panel's own module
 (`.notifications`/`.todo`/`.tests`/`.git`) for its full API
-(`notifications.add(msg, level)`, `todo.add(text)`/`.toggle_done(id)`,
-`tests.run()`/`.parse_output(text)`, ...).
+(`.notifications` is just `mep.notify`'s own `add(msg, level)`/
+`dismiss(id)`/`clear()` — see `mep.notify` above; `todo.add(text)`/
+`.toggle_done(id)`, `tests.run()`/`.parse_output(text)`, ...).
 
 **Scope note**: `mep.activitybar.tests.parse_output` is written against
 busted's own default terminal reporter output (this project's own test
@@ -1059,9 +1248,13 @@ established.
 
 Registers `mep.lsp.servers.registry`'s curated `cmd`/`filetypes`/
 `root_markers` configs (lua_ls, pyright, ts_ls, gopls, rust_analyzer,
-clangd, bashls, jsonls, yamlls, marksman — the same "curated slice, not
-nvim-lspconfig's whole catalogue" tradeoff `mep.treesitter.parsers`
-already makes for grammars) via Neovim's own native `vim.lsp.config`/
+clangd, bashls, jsonls, yamlls, marksman, zls, nimlsp, crystalline,
+jdtls, kotlin_language_server, haskell_language_server, ocamllsp,
+serve_d — the same "curated slice, not nvim-lspconfig's whole catalogue"
+tradeoff `mep.treesitter.parsers` already makes for grammars, and
+deliberately covering the same languages `mep.org.babel` executes,
+wherever a real LSP for one exists at all) via Neovim's own native
+`vim.lsp.config`/
 `vim.lsp.enable` — activating a server only if its `cmd[1]` is actually
 found on `PATH` (`vim.fn.executable`). **No server is ever installed**
 (unlike `mep.treesitter`'s parsers, which are — a C compiler + `git
@@ -1139,7 +1332,14 @@ source wins a duplicate `word`):
   automatically. If you use both libraries together, pass `lsp = {
   completion = false }` to `mep.lsp.setup()` — otherwise its own native
   `vim.lsp.completion.enable` hookup *and* this source both trigger LSP
-  completion independently, fighting over the same popup.
+  completion independently, fighting over the same popup. Inside a
+  `#+begin_src <lang> ... #+end_src` block in an org buffer with
+  `mep.org`'s poly mode active (see above), completions come from *that
+  language's* own attached client instead — the org buffer itself never
+  has one — via the same shadow-buffer bridge poly mode's own hover/
+  definition/etc. requests use; this is a soft, optional dependency
+  (`mep.completion` stays fully functional without `mep.org` loaded at
+  all).
 - **`buffer`** — the current buffer's own keyword-shaped tokens matching
   the prefix (Vim's own `<C-n>`/`<C-p>` keyword completion, folded into
   the unified popup) — always available, no external tool or LSP client
@@ -1489,6 +1689,208 @@ so the left edge recolors your left neighbor, not you — a window at
 the screen edge simply has no separator there to color, the same
 inherent limit any terminal-based split layout has.
 
+### `mep.ai` — gptel-style LLM streaming and a tool-calling agent, in any buffer
+
+`:MepAiSend` (`gl` in normal mode) sends the *whole current buffer's*
+text to a configured LLM and streams the response in directly at the
+cursor as it arrives — the same live "watch it type into the buffer"
+UX real Emacs gptel has, not a separate chat window. `:MepAiCancel`
+(`<leader>ax`) stops an in-flight request early; whatever already
+streamed in stays. Works in any buffer — no filetype/language
+restriction.
+
+`gl`/`gk` in **visual** mode are a different flow entirely: a genuinely
+interactive, multi-turn, tool-calling agent (`mep.ai.agent`) that opens
+a persistent side panel to converse in, scoped to the selection as its
+editable target but still given the whole buffer as context (see
+"Tool-calling agent (visual-mode `gl`/`gk`)" below for the full
+picture). `gl` gives it nothing beyond the block's own content (which
+may itself carry instructions, e.g. a `TODO` comment) and its own
+judgment; `gk` first opens a small floating-window prompt for an
+explicit instruction to send alongside the block — both are real,
+independent ways to direct it, exactly the way normal-mode `gl` above
+takes no prompt and `gk` did before. `:MepAiAgent`/`:MepAiAgentPrompt`
+are the same two flows as range-aware commands
+(`:'<,'>MepAiAgent` works directly from Visual mode's own command line
+too).
+
+`mep.ai.send_selection()` (`:MepAiSendSelection`/
+`:MepAiSendSelectionPrompt`, both range-aware, no keymap bound to
+either anymore) is the *older*, single-shot version of a
+selection-scoped edit: no tools, no panel, no back-and-forth — it's
+told, in a dedicated system prompt (`agent_system_prompt`, distinct
+from the plain `system_prompt` `mep.ai.send()` uses), to respond with
+*only* the block's replacement text (no explanation, no markdown code
+fences), and that response streams in *replacing* the selection
+directly. Kept as a lower-level API for when a plain one-shot block
+rewrite, with none of the tool-calling agent's overhead, is genuinely
+all that's wanted.
+
+Genuinely asynchronous, not just "doesn't freeze the editor": you're
+free to switch buffers/windows, keep editing the buffer a `mep.ai.send`/
+`send_selection` response is streaming into, or move the cursor away
+entirely while it streams. The landing spot is tracked with a real
+extmark, not a frozen `{row, col}`, so it stays correct even if
+something else edits the buffer above it in the meantime; the cursor
+auto-follows the streamed text landing (the live "watch it type"
+effect) only for as long as it's still sitting exactly where the last
+chunk left it — move it yourself and this stops dragging it back, so
+navigating away never fights you.
+
+```lua
+require('mep.ai').setup({}) -- default provider: {'openai', 'anthropic', 'ollama'}
+```
+
+"Connect to an LLM" means picking one of three named `providers`
+presets, or adding your own alongside them (`setup()` deep-merges onto
+each preset, so overriding one field — `model` — doesn't require
+repeating the rest):
+
+- **`openai`** — the Chat Completions API, `api_key_env =
+  'OPENAI_API_KEY'`, `model = 'gpt-4o-mini'` unless overridden.
+- **`anthropic`** — the Messages API, `api_key_env =
+  'ANTHROPIC_API_KEY'`, `max_tokens = 4096` and `model =
+  'claude-sonnet-5'` unless overridden.
+- **`ollama`** — a local `ollama serve`, no API key at all, talking to
+  its own OpenAI-*compatible* `/v1/chat/completions` endpoint (so it
+  needs no separate request/response handling of its own — see below).
+  `model = 'llama3.2'` unless overridden, since this preset's whole
+  point is working immediately once `ollama serve` is running and that
+  model's been pulled.
+
+`provider` (default `{'openai', 'anthropic', 'ollama'}`, in exactly
+that priority order) can be either a single name — always use exactly
+that one, prompting interactively for its key if it needs one it
+doesn't already have — or a *list*, tried in order with **no prompting
+at all**: each entry is silently skipped unless it already has a
+`model` configured and (if it needs a key) that key is already sitting
+in its own `api_key_env`. The shipped default list is exactly this
+"don't make me type a key in" flow — set `OPENAI_API_KEY`/
+`ANTHROPIC_API_KEY` in your shell profile (or wherever you already keep
+secrets — `mep.ai` never reads anything but the environment variable
+name itself) and whichever one is set gets used automatically; with
+neither set, it lands on the local `ollama` preset, which needs no key
+at all — so `:MepAiSend` (`gl`) already works the moment `ollama serve`
+is running, with zero `setup()` calls beyond the plugin being loaded.
+
+Only two request/response *shapes* exist under the hood
+(`mep.ai.providers`) — `kind = 'openai'` and `kind = 'anthropic'` —
+covering every preset above (Ollama's own compatible endpoint reuses
+the `openai` shape) plus any other OpenAI-compatible service (Groq,
+OpenRouter, DeepSeek, ...) you point a custom preset's `endpoint` at.
+
+For a single, explicitly-named provider (not a fallback list), an API
+key is resolved once per session, the first time it's actually needed:
+a literal `providers.<name>.api_key`, then that provider's own
+`api_key_env` environment variable, then (if neither) an interactive
+`vim.fn.inputsecret()` prompt — cached in memory only for the rest of
+the session, never written to disk. `:MepAiSetKey [provider]`
+(tab-completes provider names) prompts ahead of time instead of waiting
+for the first `:MepAiSend` — `[provider]` is required (not inferred)
+when `provider` is a fallback list, since it'd otherwise be ambiguous
+which one you meant. A provider with no `api_key_env` at all (the local
+`ollama` preset) is never prompted, list or not.
+
+Streaming is a real `curl` subprocess (`mep.ai.job`, via `mep.core.job`
+— the same job-runner `mep.org.babel`/`mep.picker` already use) reading
+Server-Sent Events line by line, not an HTTP client Lua dependency —
+`curl` is an external tool here, the same class of dependency `git`/a C
+compiler already are for `mep.treesitter`. The request body is written
+to a real temp file and passed as `curl --data-binary @<path>` (the
+same "temp file, not process stdin" idiom `mep.org.babel`'s own
+compiled-language execution uses), and `--fail-with-body` makes curl's
+own exit code reflect the HTTP status while still printing the error
+body, so an auth failure or bad model name surfaces as a real,
+readable error instead of a silent empty stream. Only one request
+streams at a time — `:MepAiSend` while another is still in flight
+refuses instead of racing two responses into the same buffer position.
+
+```lua
+require('mep.ai').setup({}) -- keymaps: send/agent={'gl'}, agent_prompt={'gk'}, cancel={'<leader>ax'}; provider={'openai','anthropic','ollama'}
+require('mep.ai').setup({ provider = 'anthropic' }) -- always this one, prompting for a key if ANTHROPIC_API_KEY isn't set
+require('mep.ai').setup({ provider = { 'anthropic', 'ollama' } }) -- your own, shorter fallback list
+require('mep.ai').setup({ system_prompt = 'Answer tersely.' }) -- prepended as a system message, unset by default
+require('mep.ai').setup({ tools = { 'read_file', 'list_dir' } }) -- drop run_command from the agent's tool set entirely
+```
+
+**Trying it locally, no account needed**: this repo's own `flake.nix`
+devShell lists `pkgs.ollama` (plus `pkgs.curl`, in case it isn't
+already on `PATH`) for exactly this. In one terminal:
+
+```sh
+nix develop
+ollama serve
+```
+
+and in another (same `nix develop` shell):
+
+```sh
+ollama pull llama3.2
+```
+
+then `:MepAiSend` (`gl`) already talks to it at its default
+`http://localhost:11434` — no `setup()` call needed at all beyond
+whatever loads the plugin, since `ollama` is the last, always-reachable
+entry in the default fallback list. The same `ollama`/`llama3.2` setup
+also drives the tool-calling agent below — pull a plain `llama3.2` (not
+the smaller `:1b` tag), which is the one confirmed to actually emit
+real `tool_calls` rather than hallucinating JSON as plain text.
+
+**Scope note** (`mep.ai.send`/`send_selection` only, the plain
+streaming flows): sends the buffer's/selection's text as a `user`
+message and streams one response back — no multi-turn conversation
+history, no tool-calling. See below for the flow that has both.
+
+#### Tool-calling agent (visual-mode `gl`/`gk`)
+
+`mep.ai.agent.start()` — what visual-mode `gl`/`gk` actually trigger —
+is a real, interactive, multi-turn session: it opens `mep.ai.panel` (a
+persistent side panel, `mep.sidebar`-based, the same building block
+`mep.git`'s own status panel and `mep.activitybar`'s flyouts use) and
+converses there, sending the *whole current buffer* as context on every
+call (plus, for a visual-mode call, the selection specifically as its
+editable target) — the model can ask to run a **tool** at any point,
+which pauses for an explicit permission decision before anything
+actually happens.
+
+Three tools ship by default (`config.tools`, trim the list to change
+what's on offer):
+
+- **`read_file`** — read a text file by path. `risk = 'read'`.
+- **`list_dir`** — list a directory's entries. `risk = 'read'`.
+- **`run_command`** — run a shell command (`sh -c`) from Neovim's
+  current working directory, returning exit code/stdout/stderr.
+  `risk = 'exec'`.
+
+Every tool call shows up in the panel as a permission prompt before it
+runs — `a` allows it once, `d` denies it, and `A` grants a *standing*
+"always allow this session" approval, but **only** for `risk = 'read'`
+tools: `run_command` never gets a blanket approval, no matter what's
+already been granted for the read-only tools — real shell execution
+always asks, every single time. Press `i` in the panel to type a
+free-text reply at any point the agent isn't mid-turn or waiting on a
+permission decision — answering a clarifying question it asked, giving
+it a further instruction, anything a real back-and-forth needs.
+`:MepAiCancel`/`<leader>ax` stops the agent's *current* turn (the
+session itself, and its transcript, stay open); starting a new agent
+session cancels whatever the previous one still had in flight.
+
+There is deliberately no dedicated "edit the buffer" tool — an edit
+happens the same way a human collaborator editing over your shoulder
+would do it: the agent runs a real shell command against the file on
+disk (permission-gated exactly like any other `run_command` call), and
+Neovim's own `:checktime` semantics pick the change back up into the
+live buffer afterward (if the buffer has no unsaved local edits — if it
+does, this warns instead of clobbering them, same as running
+`:checktime` by hand always has).
+
+Tool-calling requests are deliberately **non-streaming**
+(`mep.ai.job.request`, alongside the streaming `mep.ai.job.start` the
+plain flows use) — a tool call's own arguments arrive fragmented across
+many small deltas in both provider shapes, and a turn that calls tools
+has to finish completely before anything (which tools to run) can
+happen anyway, so streaming buys nothing there.
+
 ## Requirements
 
 - Neovim >= 0.9.
@@ -1518,6 +1920,7 @@ require('mep').setup({
   picker = { debounce_ms = { dynamic = 150 } }, -- mep.picker.config.defaults
   whichkey = { triggers = { '<leader>' } },     -- mep.whichkey.config.defaults
   sidebar = { position = 'right' },             -- mep.sidebar.config.defaults
+  notify = { position = 'top-right' },          -- mep.notify.config.defaults
   activitybar = { position = 'right' },         -- mep.activitybar.config.defaults
   lsp = { enable = true },                      -- mep.lsp.config.defaults
   completion = { sources = { 'lsp', 'buffer', 'path' } }, -- mep.completion.config.defaults

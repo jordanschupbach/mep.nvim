@@ -1,11 +1,13 @@
 --- Normalizes an org-babel language token (whatever the user wrote after
---- `#+begin_src`, e.g. `python`, `C++`, `sh`) into the Neovim `filetype` a
---- mep.org.polyglot shadow buffer needs for LSP attachment to pick the
---- right server up (`vim.lsp.enable`'s own `FileType` autocmd matches on
---- `filetypes` in a server's `vim.lsp.Config`) — mirroring
---- `queries/org/injections.scm`'s own (separately hand-written, since
---- treesitter parser names occasionally diverge from filetypes, e.g.
---- `c_sharp` vs `cs`) language normalization for syntax highlighting.
+--- `#+begin_src`, e.g. `python`, `C++`, `sh`) into the two separate names
+--- that actually matter downstream: the Neovim `filetype` a mep.org.
+--- polyglot shadow buffer needs for LSP attachment (`vim.lsp.enable`'s own
+--- `FileType` autocmd matches on `filetypes` in a server's `vim.lsp.
+--- Config`), and the tree-sitter parser name `mep.org.org` needs to
+--- `mep.treesitter.install.install()` so `queries/org/injections.scm`'s
+--- highlighting actually has a parser to inject — these occasionally
+--- diverge from each other too (`c_sharp` the parser vs `cs` the
+--- filetype).
 ---
 --- Deliberately just a lookup table of the divergent cases, not an
 --- exhaustive language list — same "curated slice" tradeoff
@@ -49,6 +51,49 @@ function M.to_filetype(raw)
   end
   local key = raw:lower()
   return M.filetypes[key] or key
+end
+
+--- raw babel token (lowercased) -> tree-sitter parser name, for every case
+--- where it diverges from the lowercased token itself. Kept in sync by
+--- hand with `queries/org/injections.scm`'s own (separately hand-written,
+--- since that file can't depend on this module being loaded — see its own
+--- header comment) `#any-of?`/`#set!` normalization groups; used here only
+--- to know which parser to `mep.treesitter.install.install()` for a given
+--- block, not by the query file itself.
+M.treesitter_langs = {
+  ['c++'] = 'cpp',
+  cxx = 'cpp',
+  sh = 'bash',
+  bash = 'bash',
+  shell = 'bash',
+  js = 'javascript',
+  ts = 'typescript',
+  tsx = 'tsx',
+  golang = 'go',
+  yml = 'yaml',
+  c_sharp = 'c_sharp',
+  csharp = 'c_sharp',
+  ['c#'] = 'c_sharp',
+  emacs_lisp = 'elisp',
+  -- Not `php`: `queries/org/injections.scm` injects `php_only` for a
+  -- `php`-language block (org-babel body text has no `<?php` tag, which
+  -- the regular `php` grammar requires to parse as anything but opaque
+  -- HTML text — see that query file's own comment on this pattern) — the
+  -- *parser* this function names has to match, or `php_only` would never
+  -- actually get installed for `mep.org.polyglot.ensure_language_parsers`
+  -- to have anything to inject.
+  php = 'php_only',
+}
+
+--- The tree-sitter parser name a src block's language should inject as —
+--- lowercased passthrough of `raw` when there's no divergent entry in
+--- `M.treesitter_langs`.
+function M.to_treesitter_lang(raw)
+  if not raw or raw == '' then
+    return nil
+  end
+  local key = raw:lower()
+  return M.treesitter_langs[key] or key
 end
 
 --- File extension (with leading dot, e.g. `.py`) to name a shadow buffer

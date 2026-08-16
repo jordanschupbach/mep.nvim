@@ -125,4 +125,86 @@ describe('mep.completion.sources.lsp', function()
     end)
     assert.are.same({}, result)
   end)
+
+  describe('mep.org.polyglot integration', function()
+    local orig_polyglot, orig_uri_from_bufnr
+
+    before_each(function()
+      orig_polyglot = package.loaded['mep.org.polyglot']
+      orig_uri_from_bufnr = vim.uri_from_bufnr
+      vim.uri_from_bufnr = function(bufnr)
+        return 'file:///shadow/' .. tostring(bufnr)
+      end
+    end)
+
+    after_each(function()
+      package.loaded['mep.org.polyglot'] = orig_polyglot
+      vim.uri_from_bufnr = orig_uri_from_bufnr
+    end)
+
+    local function polyglot_ctx()
+      return { bufnr = 1, win = 0, lnum = 5 }
+    end
+
+    it('queries clients attached to the shadow buffer, not the org buffer', function()
+      package.loaded['mep.org.polyglot'] = {
+        context_at_cursor = function(bufnr, lnum)
+          assert.are.equal(1, bufnr)
+          assert.are.equal(5, lnum)
+          return { shadow_bufnr = 99, ft = 'python' }
+        end,
+      }
+      local requested_bufnr
+      vim.lsp.get_clients = function(opts)
+        requested_bufnr = opts.bufnr
+        return { make_client('pyright', 1, function(handler)
+          handler(nil, { { label = 'foo' } })
+        end) }
+      end
+      local result
+      lsp_source.complete(polyglot_ctx(), function(items)
+        result = items
+      end)
+      assert.are.equal(99, requested_bufnr)
+      assert.are.equal(1, #result)
+      assert.are.equal('foo', result[1].word)
+    end)
+
+    it('points the request URI at the shadow buffer', function()
+      package.loaded['mep.org.polyglot'] = {
+        context_at_cursor = function()
+          return { shadow_bufnr = 99, ft = 'python' }
+        end,
+      }
+      vim.lsp.get_clients = function()
+        return { make_client('pyright', 1, function() end) }
+      end
+      local seen_params
+      local client = make_client('pyright', 1, function() end)
+      client.request = function(_, _method, params, _handler, bufnr)
+        seen_params = params
+        assert.are.equal(99, bufnr)
+      end
+      vim.lsp.get_clients = function()
+        return { client }
+      end
+      lsp_source.complete(polyglot_ctx(), function() end)
+      assert.are.equal('file:///shadow/99', seen_params.textDocument.uri)
+    end)
+
+    it('falls back to the org buffer when the cursor is outside any src block', function()
+      package.loaded['mep.org.polyglot'] = {
+        context_at_cursor = function()
+          return nil
+        end,
+      }
+      local requested_bufnr
+      vim.lsp.get_clients = function(opts)
+        requested_bufnr = opts.bufnr
+        return {}
+      end
+      lsp_source.complete(polyglot_ctx(), function() end)
+      assert.are.equal(1, requested_bufnr)
+    end)
+  end)
 end)

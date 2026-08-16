@@ -57,6 +57,19 @@ M.defaults = {
   -- beyond whatever `queries/org/highlights.scm`'s generic block span
   -- already gives them.
   src_block_highlight = true,
+  -- Give `#+RESULTS:` blocks (a one-line `: value`, a `#+begin_example
+  -- ... #+end_example` block, or just the `#+RESULTS:` line itself for
+  -- an empty result) a distinct color, so a src block's computed output
+  -- reads as a literal value rather than plain prose (linked to
+  -- `Constant` by default — see mep.org.resultshl). Set to false to
+  -- leave them with no color of their own.
+  results_block_highlight = true,
+  -- Give each headline level its own distinct color (level 1 blue,
+  -- cycling through a fixed 6-color rotation after that — see
+  -- mep.org.headlinehl's own `LINKS` table) instead of every level
+  -- sharing `queries/org/highlights.scm`'s single `@markup.heading`
+  -- capture. Set to false to leave every level that one shared color.
+  headline_highlight = true,
   -- "Poly mode": while the cursor is inside a `#+begin_src <lang> ...
   -- #+end_src` block, real LSP features (hover, definition, references,
   -- rename, diagnostics, manual completion) come from *that language's*

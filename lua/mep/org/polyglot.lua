@@ -29,6 +29,16 @@
 --- Neovim's own buffer-change tracking then keeps that client's view of
 --- the shadow buffer's text current automatically, the same as any real
 --- edited buffer, whenever `sync` rewrites its lines.
+---
+--- A shadow buffer's own content is otherwise never written to real
+--- disk (see `get_or_create_shadow`'s own comment for how that's
+--- enforced despite needing `buftype=''`) — except for `MANIFESTS`
+--- (below)-listed languages, where it's unavoidable: `vim.lsp.enable`
+--- attaching a client is necessary but not sufficient for those, since
+--- their servers separately validate an on-disk project structure
+--- through their own build tooling (confirmed empirically: rust-analyzer
+--- literally shells out to `cargo check`), independent of whatever
+--- Neovim's client has told them about the buffer's live content.
 local babel = require('mep.org.babel')
 local lang = require('mep.org.lang')
 
@@ -39,12 +49,109 @@ local M = {}
 -- function, defined further down.
 local refresh_diagnostics
 
--- bufnr (org buffer) -> { shadow = {[filetype] = shadow_bufnr}, diag_ns }.
+-- bufnr (org buffer) -> { shadow = {[filetype] = shadow_bufnr},
+-- shadow_paths = {[filetype] = path}, diag_ns, last_status_ft,
+-- scaffold_root }. `last_status_ft` is `status_widget()`'s own
+-- redraw-dedup state (see `setup_buffer`'s CursorMoved autocmd).
+-- `scaffold_root` is the `.mep-polyglot/<bufnr>` directory `shadow_path`
+-- computes shadow buffer paths (and any MANIFESTS scaffold file) under —
+-- cached once, at setup time, rather than recomputed from the org
+-- buffer's own name at every call, so cleanup still works after that
+-- buffer is no longer valid (`teardown_buffer` runs on `BufWipeout`).
+-- `shadow_paths` is `M.sync`'s own record of each language's on-disk
+-- path, needed only for the `MANIFESTS`-listed ones it mirrors real
+-- content to (see `M.sync`'s own comment for why).
 local state = {}
 -- shadow bufnr -> owning org bufnr, module-level (shared across every org
 -- buffer this module manages) so a jump/rename result landing on some
 -- *other* org buffer's shadow doc still resolves correctly.
 local shadow_owner = {}
+
+--- Installs (in the background, via `mep.treesitter.install` — a no-op
+--- for anything already available anywhere on `runtimepath`) the
+--- tree-sitter parser for every distinct language `bufnr`'s src blocks
+--- use, so `queries/org/injections.scm`'s highlighting actually has
+--- something to inject. Needed because `mep.treesitter`'s own
+--- `ensure_installed` only ever installs its curated registry as a whole
+--- (or an explicit subset) — it has no idea an *org* buffer's src blocks
+--- are about to need `ruby`/`rust`/`go`/etc, and `ensure_installed =
+--- false` (e.g. `scripts/try_init.lua`'s own "too heavy for a quick
+--- session" tradeoff) skips that whole-registry install entirely. Calls
+--- `on_installed(ts_lang)` once per language that successfully becomes
+--- available; never for one with no curated registry entry (`perl`, `r`
+--- — not installable this way at all) or a failed install (no compiler/
+--- git on PATH) — same graceful-miss contract as everywhere else this
+--- project touches tree-sitter.
+function M.ensure_language_parsers(bufnr, on_installed)
+  local install = require('mep.treesitter.install')
+  local seen = {}
+  for _, block in ipairs(babel.find_blocks(bufnr)) do
+    local ts_lang = lang.to_treesitter_lang(block.lang)
+    if ts_lang and not seen[ts_lang] then
+      seen[ts_lang] = true
+      install.install(ts_lang, function(ok)
+        if ok and on_installed then
+          on_installed(ts_lang)
+        end
+      end)
+    end
+  end
+end
+
+--- filetype -> `{ open, close }`: a minimal synthetic wrapper for a
+--- language whose block bodies, as literally written, aren't valid/
+--- parseable on their own — most commonly a compiled language's bare
+--- statements needing an entry-point function (real org-babel only
+--- wraps these at *execution* time, `mep.org.babel`'s own per-language
+--- `wrap_main`, applied by `execute`, not stored anywhere reusable
+--- here), but not only that (see `php`'s own entry below). A shadow
+--- buffer has no execution step, so without this a block's body would
+--- otherwise be handed to its language server exactly as written.
+--- Confirmed empirically against clangd on an unwrapped C block (`int x
+--- = 10; printf(...)`) — it doesn't just flag the bare call, it
+--- mis-parses the whole thing as an implicit-`int`-return function
+--- declaration ("type specifier missing, defaults to 'int'"), which is
+--- far more confusing than the plain "undeclared identifier" a real
+--- syntax error would give.
+---
+--- Deliberately minimal, not execution-accurate: no `:includes` handling
+--- for the entry-point languages (`#include`/Go's `import` are their own
+--- directive lines with no legal way to share a line with `open` — C's
+--- preprocessor in particular requires a directive to be alone on its
+--- physical line — so a missing header still shows as its own, more
+--- sensible "implicit declaration" diagnostic instead) and no support
+--- for more than one wrapped block (see `babel.should_wrap_main`) of the
+--- *same* entry-point language in one org file (each gets its own
+--- `open`/`close`, so two would both try to define `main` in the same
+--- shadow buffer — the
+--- identical "only one real program at a time" constraint real
+--- org-babel's own wrap-at-execution already implies, just surfaced
+--- earlier here).
+local ENTRY_WRAPPERS = {
+  c = { open = 'int main(void) {', close = 'return 0; }' },
+  cpp = { open = 'int main() {', close = 'return 0; }' },
+  rust = { open = 'fn main() {', close = '}' },
+  -- `;`-joined onto one line deliberately: Go requires exactly one
+  -- `package` clause as the file's first declaration, which would
+  -- otherwise need a *second* reserved line this module doesn't have
+  -- (only the block's own `#+begin_src`/`#+end_src` lines, already
+  -- blank, are free to reuse without shifting the body's own line
+  -- numbers) — `package main; func main() {` parses identically to the
+  -- same two statements on separate lines (Go's semicolon-insertion
+  -- rules make the two forms equivalent).
+  go = { open = 'package main; func main() {', close = '}' },
+  -- Not an entry-point wrapper at all — PHP has no such concept — but
+  -- the identical mechanism (a synthetic line on the block's own blank
+  -- `#+begin_src` slot, `close` left empty since nothing needs to follow
+  -- the body) fixes the same class of problem: confirmed empirically
+  -- that a `.php` file with no `<?php` tag doesn't fail to highlight
+  -- with some *wrong* set of captures, it doesn't parse as PHP code at
+  -- all — `(program (text))`, the grammar's own "this is just static
+  -- HTML" fallback — so there's no PHP syntax tree for a query to ever
+  -- match against. Mirrors `mep.org.babel.languages.php`'s own
+  -- `wrap_php_tags`, applied at *execution* time for the same reason.
+  php = { open = '<?php', close = '' },
+}
 
 --- Every language currently in `raw_lang`'s block(s), rebuilt as
 --- `#total_lines` lines: blank except where `bufnr`'s own src blocks in
@@ -55,24 +162,99 @@ local function shadow_lines_for(bufnr, target_ft)
   for i = 1, total do
     lines[i] = ''
   end
+  local wrapper = ENTRY_WRAPPERS[target_ft]
   for _, block in ipairs(babel.find_blocks(bufnr)) do
     if lang.to_filetype(block.lang) == target_ft then
       for k, body_line in ipairs(block.body) do
         lines[block.start_lnum + k] = body_line
+      end
+      if wrapper and babel.should_wrap_main(target_ft, babel.parse_header_args(block.args)) then
+        lines[block.start_lnum] = wrapper.open
+        lines[block.end_lnum] = wrapper.close
       end
     end
   end
   return lines
 end
 
---- A shadow buffer name inside the org file's own directory (so LSP
+--- The `.mep-polyglot/<org bufnr>` directory `shadow_path` computes every
+--- shadow buffer path under, inside the org file's own directory (so LSP
 --- `root_markers` like `.git` still resolve the way they would for the
---- real file) — never actually written to disk (`buftype=nofile`).
-local function shadow_name(org_bufnr, ft, ext)
+--- real file) — one subdirectory per org buffer so its own scaffolding
+--- never collides with another org buffer's.
+local function scaffold_root(org_bufnr)
   local org_name = vim.api.nvim_buf_get_name(org_bufnr)
   local dir = org_name ~= '' and vim.fn.fnamemodify(org_name, ':h') or vim.fn.getcwd()
-  local base = org_name ~= '' and vim.fn.fnamemodify(org_name, ':t:r') or ('buffer-' .. org_bufnr)
-  return string.format('%s/.mep-polyglot/%s.%s%s', dir, base, ft, ext)
+  return string.format('%s/.mep-polyglot/%d', dir, org_bufnr)
+end
+
+--- Directory + full path for a shadow buffer — `<scaffold_root>/<ft>/
+--- shadow<ext>`, one subdirectory per language so a real on-disk
+--- manifest (`MANIFESTS` below) can live alongside it without colliding
+--- with any other language's own. For most languages the shadow buffer's
+--- own *content* is never actually written here — see
+--- `get_or_create_shadow` below for how that's enforced despite needing
+--- `buftype=''` — `MANIFESTS`-listed ones are the one exception (see
+--- `M.sync`'s own comment for why).
+local function shadow_path(root, ft, ext)
+  local dir = root .. '/' .. ft
+  return dir, dir .. '/shadow' .. ext
+end
+
+--- ft -> function(shadow_basename) -> `{ filename, lines }` | nil: a
+--- tiny, real, on-disk project manifest some language servers flatly
+--- refuse to do anything without — confirmed empirically that both
+--- rust-analyzer and gopls return a completely empty hover result for a
+--- Cargo.toml-less/go.mod-less file (rust-analyzer additionally logs a
+--- visible "Failed to discover workspace" error on open). Written once,
+--- into the shadow buffer's own directory, the first time that directory
+--- is created; removed again with it in `teardown_buffer`.
+local MANIFESTS = {
+  rust = function(shadow_basename)
+    return {
+      filename = 'Cargo.toml',
+      lines = {
+        '[package]',
+        'name = "shadow"',
+        'version = "0.0.0"',
+        'edition = "2021"',
+        '',
+        '[[bin]]',
+        'name = "shadow"',
+        'path = "' .. shadow_basename .. '"',
+      },
+    }
+  end,
+  go = function()
+    return {
+      filename = 'go.mod',
+      lines = { 'module shadow', '', 'go 1.21' },
+    }
+  end,
+}
+
+--- Writes `ft`'s `MANIFESTS` entry (if any) into `dir`, unless it's
+--- already there (e.g. from an earlier session — never rewritten once
+--- present, it's static content that never needs to change), plus a
+--- blanket `.gitignore` (`*`) at `root` covering everything under it.
+--- Only for `MANIFESTS`-listed languages: a no-op for anything else,
+--- since a language with no entry here never gets anything written to
+--- `root`/`dir` at all (see `M.sync`'s own comment) — nothing to ignore.
+local function ensure_manifest(root, dir, ft, shadow_basename)
+  local make = MANIFESTS[ft]
+  if not make then
+    return
+  end
+  pcall(vim.fn.mkdir, root, 'p')
+  if vim.fn.filereadable(root .. '/.gitignore') == 0 then
+    vim.fn.writefile({ '*' }, root .. '/.gitignore')
+  end
+  local manifest = make(shadow_basename)
+  local path = dir .. '/' .. manifest.filename
+  if vim.fn.filereadable(path) == 0 then
+    vim.fn.mkdir(dir, 'p')
+    vim.fn.writefile(manifest.lines, path)
+  end
 end
 
 local function get_or_create_shadow(org_bufnr, raw_lang)
@@ -85,17 +267,46 @@ local function get_or_create_shadow(org_bufnr, raw_lang)
   if shadow and vim.api.nvim_buf_is_valid(shadow) then
     return shadow
   end
+  local dir, path = shadow_path(st.scaffold_root, ft, lang.to_extension(raw_lang))
+  ensure_manifest(st.scaffold_root, dir, ft, vim.fn.fnamemodify(path, ':t'))
+  st.shadow_paths[ft] = path
   shadow = vim.api.nvim_create_buf(false, true)
-  vim.bo[shadow].buftype = 'nofile'
+  -- Deliberately `buftype = ''` (a real/"normal" buffer), not the more
+  -- obvious `'nofile'` — confirmed empirically (and in Neovim's own
+  -- source, `lsp_enable_callback` in runtime/lua/vim/lsp.lua: "Only ever
+  -- attach to buffers ... that represent an actual file") that `vim.lsp.
+  -- enable`'s autostart *hard-skips any buftype other than '' or
+  -- 'help'* — a 'nofile' shadow buffer would never get a client at all,
+  -- regardless of anything else being right. Since a real buftype is
+  -- "writable" by definition, everything below exists to make sure that
+  -- writability is never actually exercised *by the user*: `modified` is
+  -- forced back to `false` after every edit (`sync`, and once more right
+  -- here after the initial content lands), and a `BufWriteCmd` autocmd
+  -- intercepts `:w`/`:wall`/`:wa` entirely (clearing `modified` instead
+  -- of writing), so `:qa`/`:wqa` never blocks on "No write since last
+  -- change" because of a buffer the user never even knows exists — this
+  -- is about *Vim's own* write path specifically; `M.sync` still
+  -- programmatically `vim.fn.writefile`s a `MANIFESTS`-listed language's
+  -- content directly (bypassing `:w`/this autocmd entirely), for reasons
+  -- particular to those languages (see `M.sync`'s own comment).
+  vim.bo[shadow].buftype = ''
   vim.bo[shadow].bufhidden = 'hide'
   vim.bo[shadow].swapfile = false
+  vim.bo[shadow].undofile = false
   vim.bo[shadow].buflisted = false
-  pcall(vim.api.nvim_buf_set_name, shadow, shadow_name(org_bufnr, ft, lang.to_extension(raw_lang)))
+  pcall(vim.api.nvim_buf_set_name, shadow, path)
   -- Fires FileType, which is what vim.lsp.enable's own autocmd (set up by
   -- mep.lsp.setup, or your own LSP config) listens on to auto-attach.
   vim.bo[shadow].filetype = ft
+  vim.bo[shadow].modified = false
   st.shadow[ft] = shadow
   shadow_owner[shadow] = org_bufnr
+  vim.api.nvim_create_autocmd('BufWriteCmd', {
+    buffer = shadow,
+    callback = function()
+      vim.bo[shadow].modified = false
+    end,
+  })
   -- Buffer-scoped to the shadow buffer itself (auto-cleaned up when it's
   -- deleted, unlike a single global-scope autocmd that would otherwise
   -- accumulate one dead closure per org buffer for the lifetime of the
@@ -128,6 +339,27 @@ function M.sync(bufnr)
       local lines = shadow_lines_for(bufnr, ft)
       if not vim.deep_equal(vim.api.nvim_buf_get_lines(shadow, 0, -1, false), lines) then
         vim.api.nvim_buf_set_lines(shadow, 0, -1, false, lines)
+        -- buftype='' (required for LSP autostart to consider this buffer
+        -- at all — see get_or_create_shadow) means this edit just set
+        -- 'modified'; force it back off so this fake, never-saved buffer
+        -- never blocks :qa/:wqa with "No write since last change".
+        vim.bo[shadow].modified = false
+        -- MANIFESTS-listed languages (rust, go) get their content
+        -- mirrored to real disk too, the one exception to "a shadow
+        -- buffer's content never touches disk" — confirmed empirically
+        -- that this is unavoidable for them specifically: their
+        -- MANIFESTS scaffold makes `vim.lsp.enable` and rust-analyzer/
+        -- gopls agree a real project exists here at all, but a build-
+        -- system-backed workspace load (`cargo check` for rust-analyzer;
+        -- confirmed via a literal `error: can't find bin ... at path`)
+        -- still separately validates that path *on disk*, independent of
+        -- anything Neovim's LSP client has told it about the open
+        -- buffer's own in-memory content. `ensure_manifest` already
+        -- wrote a blanket `.gitignore` (`*`) into this org buffer's own
+        -- scaffold_root, so this never leaks into the user's own repo.
+        if MANIFESTS[ft] and st.shadow_paths[ft] then
+          pcall(vim.fn.writefile, lines, st.shadow_paths[ft])
+        end
       end
     end
   end
@@ -395,6 +627,11 @@ function M.teardown_buffer(bufnr)
     end
   end
   pcall(vim.diagnostic.reset, st.diag_ns, bufnr)
+  -- Removes any MANIFESTS scaffold file(s) get_or_create_shadow wrote —
+  -- the only thing this module ever puts on real disk.
+  if st.scaffold_root then
+    pcall(vim.fn.delete, st.scaffold_root, 'rf')
+  end
   state[bufnr] = nil
 end
 
@@ -433,7 +670,9 @@ function M.setup_buffer(bufnr, opts)
   if first_time then
     state[bufnr] = {
       shadow = {},
+      shadow_paths = {},
       diag_ns = vim.api.nvim_create_namespace('mep_org_polyglot_diag_' .. bufnr),
+      scaffold_root = scaffold_root(bufnr),
     }
   end
 
@@ -466,10 +705,79 @@ function M.setup_buffer(bufnr, opts)
         end)
       end,
     })
+    -- Keeps `status_widget()` live: Neovim only redraws the tabline on
+    -- its own on a handful of built-in triggers (window/buffer/mode
+    -- changes, ...), none of which fire from moving the cursor between
+    -- src blocks (or in and out of one) in the *same* window — the exact
+    -- motion `status_widget()` needs to reflect. Only actually redraws
+    -- when the reported language changes, not on every single cursor
+    -- move, so panning around inside one block (the common case) doesn't
+    -- redraw the tabline on every keystroke.
+    vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
+      group = group,
+      buffer = bufnr,
+      callback = function()
+        local ctx = M.context_at_cursor(bufnr, vim.api.nvim_win_get_cursor(0)[1])
+        local ft = ctx and ctx.ft or nil
+        local st = state[bufnr]
+        if st and st.last_status_ft ~= ft then
+          st.last_status_ft = ft
+          pcall(vim.cmd.redrawtabline)
+        end
+      end,
+    })
   end
 
+  M.define_default_hl()
   vim.bo[bufnr].omnifunc = "v:lua.require'mep.org.polyglot'.omnifunc"
   bind_keymaps(bufnr, opts.keymaps or {})
+end
+
+--- `MepOrgPolyglotStatus` (linked to `ModeMsg` — the same highlight
+--- mep.chrome's own analogous "what mode am I in" tabline widget uses,
+--- see mep.chrome.statusline's `mode_widget`), `default = true` so a
+--- colorscheme defining its own wins. Called once per `setup_buffer`
+--- (cheap, idempotent — same "define on every activation" approach
+--- mep.org.blockhl's own `define_default_hl` uses) rather than requiring
+--- a separate setup step.
+function M.define_default_hl()
+  vim.api.nvim_set_hl(0, 'MepOrgPolyglotStatus', { link = 'ModeMsg', default = true })
+end
+
+--- A `mep.chrome`-shaped widget (`{ text = function(ctx) ... end, hl =
+--- ... }` — see mep.chrome.render's own widget contract) showing the
+--- language of the src block at the cursor (` python `, ` rust `, ...),
+--- or nothing outside an org buffer / outside any src block. Not wired
+--- into any tabline/statusline automatically — mep.chrome has no
+--- awareness of mep.org (or any other library) and mep.org has none of
+--- mep.chrome, the same independence every pair of mep libraries keeps
+--- (see README) — compose it into your own config instead:
+---
+--- require('mep.chrome').setup({ tabline = { widgets_after = {
+---   require('mep.org.polyglot').status_widget(),
+--- } } })
+---
+--- `ctx` (mep.chrome's own render-time context, `{ win, bufnr, active }`)
+--- is used when given; falls back to the current window/buffer so this
+--- also works called plainly (`status_widget().text()`) from anywhere
+--- else you might want the same text, e.g. a custom statusline.
+function M.status_widget()
+  return {
+    text = function(ctx)
+      local bufnr = (ctx and ctx.bufnr) or vim.api.nvim_get_current_buf()
+      local win = (ctx and ctx.win) or vim.api.nvim_get_current_win()
+      if vim.bo[bufnr].filetype ~= 'org' then
+        return ''
+      end
+      local ok, cursor = pcall(vim.api.nvim_win_get_cursor, win)
+      if not ok then
+        return ''
+      end
+      local ctx_at_cursor = M.context_at_cursor(bufnr, cursor[1])
+      return ctx_at_cursor and (' ' .. ctx_at_cursor.ft .. ' ') or ''
+    end,
+    hl = 'MepOrgPolyglotStatus',
+  }
 end
 
 return M

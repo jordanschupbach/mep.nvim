@@ -46,6 +46,8 @@ local agenda = require('mep.org.agenda')
 local babel = require('mep.org.babel')
 local block_mod = require('mep.org.block')
 local blockhl = require('mep.org.blockhl')
+local resultshl = require('mep.org.resultshl')
+local headlinehl = require('mep.org.headlinehl')
 local footnote_mod = require('mep.org.footnote')
 local macro_mod = require('mep.org.macro')
 local include_mod = require('mep.org.include')
@@ -84,6 +86,8 @@ M.agenda = agenda
 M.babel = babel
 M.block = block_mod
 M.blockhl = blockhl
+M.resultshl = resultshl
+M.headlinehl = headlinehl
 M.footnote = footnote_mod
 M.macro = macro_mod
 M.include = include_mod
@@ -426,6 +430,36 @@ local function apply_block_highlight(bufnr, options)
   })
 end
 
+local function apply_results_highlight(bufnr, options)
+  if not options.results_block_highlight then
+    return
+  end
+  resultshl.define_default_hl()
+  resultshl.apply(bufnr)
+  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'InsertLeave' }, {
+    group = augroup,
+    buffer = bufnr,
+    callback = function()
+      resultshl.apply(bufnr)
+    end,
+  })
+end
+
+local function apply_headline_highlight(bufnr, options)
+  if not options.headline_highlight then
+    return
+  end
+  headlinehl.define_default_hl()
+  headlinehl.apply(bufnr)
+  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'InsertLeave' }, {
+    group = augroup,
+    buffer = bufnr,
+    callback = function()
+      headlinehl.apply(bufnr)
+    end,
+  })
+end
+
 local function apply_fold(bufnr, options)
   -- Explicitly reset to Vim's own default ('manual') when disabled,
   -- rather than just skipping — 'foldmethod' is window-local, so a
@@ -458,6 +492,53 @@ local function apply_highlight(bufnr, options)
       require('mep.treesitter.activate').enable_for_buffer(bufnr, { highlight = true })
     end
   end)
+  -- Also install a parser for each language bufnr's src blocks actually
+  -- use (mep.org.polyglot.ensure_language_parsers) — org's own parser
+  -- being installed doesn't get queries/org/injections.scm anything to
+  -- inject on its own.
+  --
+  -- Once a given language's parser (and, per mep.treesitter.install, its
+  -- own queries/ alongside it) lands, two *independent* stale-cache
+  -- problems need clearing before it actually shows up highlighted —
+  -- confirmed empirically, both against Neovim's own source:
+  --
+  -- 1. A LanguageTree only ever attempts to resolve a given byte range's
+  --    injection language *once* (`_processed_injection_region`, keyed
+  --    purely on "has this range been looked at", with no notion of "a
+  --    parser that failed to resolve then might succeed now") — real
+  --    usage parses+highlights a buffer within its first couple of
+  --    redraws, almost always before a background clone+compile can
+  --    finish, so the block would otherwise never even get a child tree
+  --    for its language. `parser:invalidate(true)` clears the
+  --    tree-validity state that gates re-resolution.
+  -- 2. Independently, `vim.treesitter.highlighter`'s own per-buffer
+  --    instance caches each language's parsed *query* forever once
+  --    first asked for (`self._queries[lang]`, `get_query()` in
+  --    runtime/lua/vim/treesitter/highlighter.lua — never invalidated
+  --    for that instance's lifetime), so even after (1) creates the
+  --    child tree, the *same* highlighter instance that already cached
+  --    "no query for this language" earlier keeps drawing nothing for
+  --    it. Only a genuinely new highlighter instance re-reads queries
+  --    from scratch — `enable_for_buffer` (`vim.treesitter.start` again)
+  --    does exactly that, discarding the stale one.
+  --
+  -- Scheduling a redraw after both makes the result visible immediately
+  -- rather than on the next incidental edit/cursor-move.
+  polyglot.ensure_language_parsers(bufnr, function()
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+      return
+    end
+    local ok_parser, parser = pcall(vim.treesitter.get_parser, bufnr, 'org')
+    if ok_parser and parser then
+      parser:invalidate(true)
+    end
+    require('mep.treesitter.activate').enable_for_buffer(bufnr, { highlight = true })
+    vim.schedule(function()
+      if vim.api.nvim_buf_is_valid(bufnr) then
+        pcall(vim.cmd.redraw)
+      end
+    end)
+  end)
 end
 
 local function apply_polyglot(bufnr, options)
@@ -471,6 +552,8 @@ local function activate_org_buffer(bufnr, options)
   apply_tags_align_on_save(bufnr, options)
   apply_conceal(bufnr, options)
   apply_block_highlight(bufnr, options)
+  apply_results_highlight(bufnr, options)
+  apply_headline_highlight(bufnr, options)
   apply_polyglot(bufnr, options)
 end
 

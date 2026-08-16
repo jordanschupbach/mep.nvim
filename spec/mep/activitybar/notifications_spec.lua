@@ -1,5 +1,12 @@
+-- mep.activitybar.notifications is a thin mep.sidebar view attached to
+-- mep.notify (the same "same content, differently-sized host sidebar"
+-- pattern spec/mep/activitybar/git_spec.lua exercises for mep.git.
+-- sidebar) — this file only tests the delegation/sizing/wiring, not the
+-- underlying entry-list/hook logic, which spec/mep/notify/notify_spec.lua
+-- already covers directly.
 local notifications = require('mep.activitybar.notifications')
 local config = require('mep.activitybar.config')
+local notify = require('mep.notify')
 
 local function feed(keys)
   vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(keys, true, false, true), 'x', false)
@@ -11,121 +18,52 @@ describe('mep.activitybar.notifications', function()
   before_each(function()
     saved_config = vim.deepcopy(config.options)
     notifications._reset()
+    notify._reset()
   end)
 
   after_each(function()
     notifications._reset()
+    notify._reset()
     config.options = saved_config
   end)
 
-  describe('add / dismiss / clear', function()
-    it('adds an entry, newest first', function()
-      notifications.add('first', vim.log.levels.INFO)
-      notifications.add('second', vim.log.levels.WARN)
-      assert.are.equal('second', notifications.entries[1].text)
-      assert.are.equal('first', notifications.entries[2].text)
+  describe('sidebar', function()
+    it("sizes/positions the panel from mep.activitybar's own config", function()
+      config.setup({ position = 'left', panel_width = 55, float = false, border = 'none' })
+      local sb = notifications.sidebar()
+      assert.are.equal('left', sb.opts.position)
+      assert.are.equal(55, sb.opts.width)
+      assert.is_false(sb.opts.float)
     end)
 
-    it('trims to config.notifications.max_entries', function()
-      config.setup({ notifications = { max_entries = 3 } })
-      for i = 1, 5 do
-        notifications.add('n' .. i)
+    it('attaches to mep.notify, so an entry added elsewhere shows up here too', function()
+      notifications.sidebar().opts.animate = false
+      notifications.sidebar():open()
+      notify.add('from elsewhere')
+      local lines = vim.api.nvim_buf_get_lines(notifications.sidebar().buf, 0, -1, false)
+      local found = false
+      for _, l in ipairs(lines) do
+        if l:find('from elsewhere', 1, true) then
+          found = true
+        end
       end
-      assert.are.equal(3, #notifications.entries)
-      assert.are.equal('n5', notifications.entries[1].text)
+      assert.is_true(found)
     end)
 
-    it('dismiss removes just the matching entry', function()
-      notifications.add('a')
-      notifications.add('b')
-      local id_b = notifications.entries[1].id
-      notifications.dismiss(id_b)
-      assert.are.equal(1, #notifications.entries)
-      assert.are.equal('a', notifications.entries[1].text)
-    end)
-
-    it('clear empties everything', function()
-      notifications.add('a')
-      notifications.add('b')
-      notifications.clear()
-      assert.are.same({}, notifications.entries)
+    it('a dismiss here removes it from mep.notify itself, not a separate copy', function()
+      notify.add('dismiss me')
+      notifications.sidebar().opts.animate = false
+      notifications.toggle()
+      -- row 1 = section header, row 2 = "Clear all", row 3 = this entry
+      vim.api.nvim_win_set_cursor(notifications.sidebar().win, { 3, 0 })
+      feed('<CR>')
+      assert.are.same({}, notify.entries)
     end)
   end)
 
-  describe('sections', function()
-    it('shows a placeholder when there are no entries', function()
-      local sections = notifications.sections()
-      assert.are.equal('No notifications', sections[1].widgets[1].text)
-    end)
-
-    it('shows a "Clear all" widget first, then one per entry', function()
-      notifications.add('a')
-      notifications.add('b')
-      local widgets = notifications.sections()[1].widgets
-      assert.are.equal('Clear all', widgets[1].text)
-      assert.are.equal('b', widgets[2].text)
-      assert.are.equal('a', widgets[3].text)
-    end)
-
-    it('colors an entry by its level', function()
-      notifications.add('oops', vim.log.levels.ERROR)
-      local widgets = notifications.sections()[1].widgets
-      assert.are.equal('DiagnosticError', widgets[2].hl)
-    end)
-
-    it("an entry's on_click dismisses it", function()
-      notifications.add('a')
-      local widget = notifications.sections()[1].widgets[2]
-      widget.on_click(widget)
-      assert.are.same({}, notifications.entries)
-    end)
-  end)
-
-  describe('install / uninstall', function()
-    it('captures a real vim.notify call as an entry and still calls through', function()
-      local passthrough_called = false
-      local orig = vim.notify
-      vim.notify = function()
-        passthrough_called = true
-      end
-      -- install() must snapshot *this* stub as "the real notify" to
-      -- prove it always calls through, not just happens to work because
-      -- the real vim.notify was still in place
-      notifications.install()
-      vim.notify('hello', vim.log.levels.WARN)
-      vim.notify = orig
-
-      assert.are.equal(1, #notifications.entries)
-      assert.are.equal('hello', notifications.entries[1].text)
-      assert.is_true(passthrough_called)
-    end)
-
-    it('is idempotent', function()
-      local orig = vim.notify
-      notifications.install()
-      local wrapped = vim.notify
-      notifications.install()
-      assert.are.equal(wrapped, vim.notify)
-      vim.notify = orig
-    end)
-
-    it('uninstall restores the original vim.notify', function()
-      local orig = vim.notify
-      notifications.install()
-      notifications.uninstall()
-      assert.are.equal(orig, vim.notify)
-    end)
-  end)
-
-  describe('sidebar / toggle', function()
-    after_each(function()
-      pcall(function()
-        notifications.sidebar():close()
-      end)
-    end)
-
-    it('toggle opens the panel with current entries rendered', function()
-      notifications.add('hello there')
+  describe('toggle', function()
+    it('opens the panel with current mep.notify entries rendered', function()
+      notify.add('hello there')
       notifications.sidebar().opts.animate = false
       notifications.toggle()
       assert.is_true(notifications.sidebar():is_open())
@@ -138,14 +76,15 @@ describe('mep.activitybar.notifications', function()
       end
       assert.is_true(found)
     end)
+  end)
 
-    it('activating a notification widget dismisses it live', function()
-      notifications.add('dismiss me')
+  describe('_reset', function()
+    it('closes its own sidebar but leaves mep.notify entries untouched', function()
+      notify.add('survives')
       notifications.sidebar().opts.animate = false
-      notifications.toggle()
-      vim.api.nvim_win_set_cursor(notifications.sidebar().win, { 2, 0 })
-      feed('<CR>')
-      assert.are.same({}, notifications.entries)
+      notifications.sidebar():open()
+      notifications._reset()
+      assert.are.equal(1, #notify.entries)
     end)
   end)
 end)

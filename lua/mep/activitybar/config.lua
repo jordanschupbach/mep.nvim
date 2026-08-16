@@ -48,10 +48,6 @@ M.defaults = {
     { id = 'tests', icon = '▶', label = 'Tests' },
     { id = 'git', icon = '⎇', label = 'Git' },
   },
-  notifications = {
-    -- Oldest entries drop off once this many are buffered.
-    max_entries = 200,
-  },
   todo = {
     -- Where the todo list is persisted as JSON between sessions. `nil`
     -- means `stdpath('data') .. '/mep_activitybar_todo.json'`, resolved

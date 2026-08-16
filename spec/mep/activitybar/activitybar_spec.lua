@@ -1,5 +1,6 @@
 local activitybar = require('mep.activitybar.activitybar')
 local config = require('mep.activitybar.config')
+local notify = require('mep.notify')
 
 local function feed(keys)
   vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(keys, true, false, true), 'x', false)
@@ -19,6 +20,7 @@ describe('mep.activitybar.activitybar', function()
 
   after_each(function()
     activitybar._reset()
+    notify._reset()
     config.options = saved_config
     vim.fn.delete(tmpdir, 'rf')
   end)
@@ -166,7 +168,7 @@ describe('mep.activitybar.activitybar', function()
       vim.notify('captured me')
       vim.notify = orig
 
-      assert.are.equal('captured me', activitybar.notifications.entries[1].text)
+      assert.are.equal('captured me', notify.entries[1].text)
     end)
 
     it('does not auto-open the bar on VimEnter by default', function()

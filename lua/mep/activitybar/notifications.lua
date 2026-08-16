@@ -1,10 +1,17 @@
---- The notifications panel: a `mep.sidebar` instance fed by hooking
---- `vim.notify` itself, so anything anywhere (this project's own
---- libraries, your own config, another plugin) shows up without any
---- extra call — the same "introspect what's really there" approach
---- `mep.whichkey` takes for keymaps, applied to notifications instead.
+--- The notifications panel: a `mep.sidebar` instance sized/anchored the
+--- same way as `.todo`/`.tests`/`.git` (this activity bar's own
+--- position/panel_width/float/border/animate config, stacked next to
+--- the icon column via `bar_edge_offset`), but its content, history,
+--- and the `vim.notify` hook itself all come from the standalone `mep.
+--- notify` library — `M.sidebar()` attaches this instance to it (`mep.
+--- notify.attach`), the exact same "one shared data source, N attached
+--- sidebar views" pattern `mep.activitybar.git` uses to attach to `mep.
+--- git.sidebar`, so this panel and `mep.notify`'s own popups/standalone
+--- panel/history all stay in sync rather than keeping a second copy of
+--- any of it.
 local sidebar_mod = require('mep.sidebar')
 local config = require('mep.activitybar.config')
+local notify = require('mep.notify')
 
 local M = {}
 
@@ -29,123 +36,13 @@ local function bar_edge_offset()
   return bar_content_width() + sidebar_mod.border_pad(config.options.border)
 end
 
-M.entries = {}
-local next_id = 1
-local orig_notify = nil
 local sidebar = nil
 
-local LEVEL_HL = {
-  [vim.log.levels.ERROR] = 'DiagnosticError',
-  [vim.log.levels.WARN] = 'DiagnosticWarn',
-  [vim.log.levels.INFO] = 'DiagnosticInfo',
-  [vim.log.levels.DEBUG] = 'DiagnosticHint',
-  [vim.log.levels.TRACE] = 'DiagnosticHint',
-}
-
-local LEVEL_ICON = {
-  [vim.log.levels.ERROR] = '✗',
-  [vim.log.levels.WARN] = '⚠',
-  [vim.log.levels.INFO] = 'ℹ',
-  [vim.log.levels.DEBUG] = '·',
-  [vim.log.levels.TRACE] = '·',
-}
-
-local function refresh()
-  if sidebar then
-    sidebar:set_sections(M.sections())
-  end
-end
-
---- Record `msg`/`level` as a new entry (newest first), trimming to
---- `config.options.notifications.max_entries`. Does *not* call through
---- to any real notification backend itself — `install()` is what wires
---- this into `vim.notify`; call this directly yourself if you want an
---- entry without a real notification alongside it.
-function M.add(msg, level)
-  table.insert(M.entries, 1, { id = next_id, text = tostring(msg), level = level or vim.log.levels.INFO, time = os.time() })
-  next_id = next_id + 1
-  local max = config.options.notifications.max_entries
-  while #M.entries > max do
-    table.remove(M.entries)
-  end
-  refresh()
-end
-
---- Remove the entry with `id`.
-function M.dismiss(id)
-  for i, e in ipairs(M.entries) do
-    if e.id == id then
-      table.remove(M.entries, i)
-      break
-    end
-  end
-  refresh()
-end
-
---- Remove every entry.
-function M.clear()
-  M.entries = {}
-  refresh()
-end
-
---- The `mep.sidebar` section list for the current `M.entries`: a
---- "Clear all" button (only when there's something to clear) followed
---- by one dismissible widget per entry, each colored by its log level
---- (Neovim's own `Diagnostic*` highlight groups, so this doesn't need
---- to define/document five new highlight groups of its own).
-function M.sections()
-  local widgets = {}
-  if #M.entries > 0 then
-    widgets[#widgets + 1] = { id = '__clear__', text = 'Clear all', icon = '🗑', on_click = function()
-      M.clear()
-    end }
-  end
-  for _, e in ipairs(M.entries) do
-    widgets[#widgets + 1] = {
-      id = tostring(e.id),
-      text = e.text,
-      icon = LEVEL_ICON[e.level] or LEVEL_ICON[vim.log.levels.INFO],
-      hl = LEVEL_HL[e.level] or LEVEL_HL[vim.log.levels.INFO],
-      tooltip = 'Click to dismiss',
-      on_click = function()
-        M.dismiss(e.id)
-      end,
-    }
-  end
-  if #widgets == 0 then
-    widgets[1] = { id = '__empty__', text = 'No notifications' }
-  end
-  return { { id = 'notifications', title = 'Notifications', widgets = widgets } }
-end
-
---- Hook `vim.notify` so every real notification also becomes an entry
---- here (idempotent — a second call is a no-op). The real notification
---- still goes through afterward; this only ever adds a side channel, it
---- never suppresses one.
-function M.install()
-  if orig_notify then
-    return
-  end
-  orig_notify = vim.notify
-  vim.notify = function(msg, level, opts)
-    M.add(msg, level)
-    return orig_notify(msg, level, opts)
-  end
-end
-
---- Undo `install()`.
-function M.uninstall()
-  if orig_notify then
-    vim.notify = orig_notify
-    orig_notify = nil
-  end
-end
-
---- This panel's `mep.sidebar` instance, creating it (closed) the first
---- time it's needed.
+--- This panel's `mep.sidebar` instance, creating it (closed, and
+--- attached to `mep.notify` via `M.attach`) the first time it's needed.
 function M.sidebar()
   if not sidebar then
-    sidebar = sidebar_mod.new({
+    sidebar = notify.attach(sidebar_mod.new({
       title = 'Notifications',
       position = config.options.position,
       width = config.options.panel_width,
@@ -153,8 +50,11 @@ function M.sidebar()
       border = config.options.border,
       edge_offset = bar_edge_offset(),
       animate = config.options.animate,
-      sections = M.sections(),
-    })
+      sections = notify.sections(),
+      on_open = function(sb)
+        notify.bind_dismiss_keymaps(sb)
+      end,
+    }))
   end
   return sidebar
 end
@@ -163,12 +63,14 @@ end
 --- it's never stale from while it was closed.
 function M.toggle()
   local sb = M.sidebar()
-  sb:set_sections(M.sections())
+  sb:set_sections(notify.sections())
   sb:toggle()
 end
 
---- Test/dev-only: drop the cached sidebar instance and hook state so a
---- fresh `sidebar()`/`install()` starts clean.
+--- Test/dev-only: drop the cached sidebar instance so a fresh
+--- `sidebar()` starts clean. Does not touch `mep.notify`'s own state —
+--- that module's own `_reset()` is still responsible for the entry
+--- list/hook/popups this panel only ever reads.
 function M._reset()
   if sidebar then
     pcall(function()
@@ -176,9 +78,6 @@ function M._reset()
     end)
   end
   sidebar = nil
-  M.entries = {}
-  next_id = 1
-  M.uninstall()
 end
 
 return M
