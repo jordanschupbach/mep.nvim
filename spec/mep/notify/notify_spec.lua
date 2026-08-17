@@ -17,6 +17,17 @@ describe('mep.notify', function()
   after_each(function()
     notify._reset()
     config.options = saved_options
+    -- setup() binds config.options.keymaps.toggle globally with no
+    -- disable() counterpart (mep.git.git's own bind_global_keymaps has
+    -- the same leak risk, per its git_spec.lua teardown comment) — clean
+    -- up whatever a test's own setup() may have bound, default or
+    -- overridden, so it doesn't leak into later spec files.
+    for _, lhs in ipairs({ '<F7>' }) do
+      pcall(vim.keymap.del, 'n', lhs)
+    end
+    for _, lhs in ipairs(config.defaults.keymaps.toggle) do
+      pcall(vim.keymap.del, 'n', lhs)
+    end
   end)
 
   describe('add / dismiss / clear', function()
@@ -259,6 +270,15 @@ describe('mep.notify', function()
     it('applies config', function()
       notify.setup({ max_entries = 5 })
       assert.are.equal(5, config.options.max_entries)
+    end)
+
+    it('binds keymaps.toggle to open/close the standalone panel', function()
+      notify.setup({ keymaps = { toggle = { '<F7>' } } })
+      notify.sidebar().opts.animate = false
+      feed('<F7>')
+      assert.is_true(notify.sidebar():is_open())
+      feed('<F7>')
+      assert.is_false(notify.sidebar():is_open())
     end)
   end)
 end)

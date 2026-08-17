@@ -307,6 +307,46 @@ describe('mep.sidebar.engine', function()
         assert.are.equal(vim.o.columns - 20, vim.api.nvim_win_get_config(s.win).col)
       end)
     end)
+
+    describe('tabline reservation', function()
+      local saved_showtabline
+
+      before_each(function()
+        saved_showtabline = vim.o.showtabline
+        vim.o.showtabline = 2 -- always shown, regardless of tab count
+      end)
+
+      after_each(function()
+        vim.o.showtabline = saved_showtabline
+      end)
+
+      it('drops a left/right float below row 0 and shrinks its height to match', function()
+        local s = new({ float = true, position = 'right', width = 22, border = 'none' })
+        s:open()
+        local cfg = vim.api.nvim_win_get_config(s.win)
+        assert.are.equal(1, cfg.row)
+        assert.are.equal(vim.o.lines - vim.o.cmdheight - 1, cfg.height)
+      end)
+
+      it('drops a top float below row 0 instead of covering the tabline', function()
+        local s = new({ float = true, position = 'top', height = 10, border = 'none' })
+        s:open()
+        assert.are.equal(1, vim.api.nvim_win_get_config(s.win).row)
+      end)
+
+      it('does not affect a bottom float, which never reaches row 0', function()
+        local s = new({ float = true, position = 'bottom', height = 8, border = 'none' })
+        s:open()
+        assert.are.equal(vim.o.lines - vim.o.cmdheight - 8, vim.api.nvim_win_get_config(s.win).row)
+      end)
+
+      it('leaves geometry untouched when the tabline is not shown', function()
+        vim.o.showtabline = 0
+        local s = new({ float = true, position = 'right', width = 22, border = 'none' })
+        s:open()
+        assert.are.equal(0, vim.api.nvim_win_get_config(s.win).row)
+      end)
+    end)
   end)
 
   describe('rendering', function()

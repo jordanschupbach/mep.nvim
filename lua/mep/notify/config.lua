@@ -60,6 +60,11 @@ M.defaults = {
     animate = true,
   },
   keymaps = {
+    -- Global: open/close the standalone history panel (`M.toggle`,
+    -- see mep.notify.notify) — independent of any `mep.activitybar`-
+    -- embedded notifications button, same "toggle_sidebar" global-
+    -- keymap precedent as `mep.git.config.defaults.keymaps`.
+    toggle = { '<leader>nn' },
     -- Dismiss the notification under the cursor, in the history panel
     -- — on top of the mep.sidebar's own default `<CR>`/click, which
     -- already runs a widget's `on_click` (also a dismiss) either way.

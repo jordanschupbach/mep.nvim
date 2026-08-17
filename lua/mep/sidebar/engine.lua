@@ -135,6 +135,26 @@ local function is_vertical(position)
   return position == 'left' or position == 'right'
 end
 
+--- How many screen rows the tabline currently occupies (0 or 1). A
+--- floating window's `row = 0` (`relative = 'editor'`) lands on the
+--- tabline's own row, not below it the way a real split's first window
+--- automatically does (confirmed empirically: `nvim_win_get_position`
+--- on a normal window reports row 1 with the tabline shown, but a fresh
+--- `row = 0` float reports row 0, right on top of it) — every full-span
+--- float below (a left/right sidebar's height, a top sidebar's row)
+--- has to account for this itself. Mirrors Neovim's own "is the tabline
+--- actually drawn" rule: always at `showtabline = 2`, or at `= 1` only
+--- once a second tab exists.
+local function tabline_rows()
+  if vim.o.showtabline == 2 then
+    return 1
+  end
+  if vim.o.showtabline == 1 and vim.fn.tabpagenr('$') > 1 then
+    return 1
+  end
+  return 0
+end
+
 function Sidebar:_target_size()
   return is_vertical(self.opts.position) and self.opts.width or self.opts.height
 end
@@ -181,13 +201,19 @@ Sidebar.border_pad = border_pad
 function Sidebar:_float_geometry(n)
   local pad = border_pad(self.opts.border)
   local offset = self.opts.edge_offset or 0
+  local top_reserve = tabline_rows()
   if is_vertical(self.opts.position) then
-    local height = math.max(1, vim.o.lines - vim.o.cmdheight - pad)
+    local height = math.max(1, vim.o.lines - vim.o.cmdheight - pad - top_reserve)
     local col = (self.opts.position == 'right') and math.max(0, vim.o.columns - n - pad - offset) or offset
-    return { relative = 'editor', row = 0, col = col, width = n, height = height }
+    return { relative = 'editor', row = top_reserve, col = col, width = n, height = height }
   end
   local width = math.max(1, vim.o.columns - pad)
-  local row = (self.opts.position == 'bottom') and math.max(0, vim.o.lines - vim.o.cmdheight - n - pad - offset) or offset
+  local row
+  if self.opts.position == 'bottom' then
+    row = math.max(0, vim.o.lines - vim.o.cmdheight - n - pad - offset)
+  else
+    row = top_reserve + offset
+  end
   return { relative = 'editor', row = row, col = 0, width = width, height = n }
 end
 

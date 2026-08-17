@@ -45,13 +45,13 @@ local function tab_close_widget()
 end
 
 --- The default `tabline` `widgets_buttons`: right-aligned toggle
---- buttons for tests/notifications/git/filetree/symbols, one per
---- `mep.activitybar` flyout panel plus `mep.filetree`/`mep.symbols`'
---- own toggles. Each is a soft, optional dependency (`pcall`'d
---- `require`, resolved lazily at click time, not at config-definition
---- time) — clicking one without that library loaded/configured is a
---- harmless no-op, the same "everything independently optional"
---- convention `mep.zen` uses for its own soft deps.
+--- buttons for tests/notifications/git/filetree/symbols/todo, one per
+--- `mep.activitybar` flyout panel plus `mep.filetree`/`mep.symbols`/
+--- `mep.todo`'s own toggles. Each is a soft, optional dependency
+--- (`pcall`'d `require`, resolved lazily at click time, not at
+--- config-definition time) — clicking one without that library loaded/
+--- configured is a harmless no-op, the same "everything independently
+--- optional" convention `mep.zen` uses for its own soft deps.
 local function toggle_button(icon_name, require_path)
   return {
     text = function()
@@ -73,6 +73,7 @@ local function tabline_buttons()
     toggle_button('git', 'mep.activitybar.git'),
     toggle_button('filetree', 'mep.filetree'),
     toggle_button('symbols', 'mep.symbols'),
+    toggle_button('todo', 'mep.todo'),
   }
 end
 

@@ -47,6 +47,10 @@ describe('mep.notify.config', function()
     assert.are.same({ 'C' }, config.defaults.keymaps.clear)
   end)
 
+  it('has a default global toggle keymap for the standalone panel', function()
+    assert.are.same({ '<leader>nn' }, config.defaults.keymaps.toggle)
+  end)
+
   it('has its own independent panel sizing, distinct from mep.activitybar', function()
     assert.are.equal('right', config.defaults.panel.position)
     assert.are.equal(50, config.defaults.panel.width)

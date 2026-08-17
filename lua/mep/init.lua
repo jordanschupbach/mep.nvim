@@ -8,7 +8,7 @@
 --- `mep.symbols`, `mep.hints`, `mep.dap`, `mep.docs`, `mep.flashcards`,
 --- `mep.help`, `mep.colorizer`, `mep.leetcode`, `mep.roam`, `mep.run`,
 --- `mep.repl`, `mep.snippet`, `mep.todoscan`, `mep.zen`, `mep.clipboard`,
---- `mep.bib`);
+--- `mep.bib`, `mep.todo`);
 --- libraries can equally be required and configured directly, e.g.
 --- `require('mep.picker').setup({ ... })`.
 local M = {}
@@ -26,9 +26,10 @@ local M = {}
 -- instance) and *before* `activitybar`, since `activitybar.setup()`
 -- calls `mep.notify.install()` to hook `vim.notify` (its own
 -- notifications panel is just a view onto `mep.notify`'s entries now,
--- not a separate hook of its own) — not strictly load-bearing either
--- (`install()` doesn't read `mep.notify`'s own config), just consistent
--- with "depended-upon library goes first". `activitybar` is
+-- not a separate hook of its own); it also needs to be after `sanity`
+-- for the same `<leader>`-resolved-at-definition-time reason as
+-- `whichkey` above — `notify.setup()` binds `keymaps.toggle` (default
+-- `<leader>nn`) globally. `activitybar` is
 -- listed after `sidebar` for the same "reads the other library's
 -- options" reasoning, though less strictly load-bearing: every
 -- `mep.sidebar.new(...)` call it makes fully specifies its own
@@ -117,6 +118,14 @@ local M = {}
 -- `vim.g.maplocalleader` is set, but that's a user prerequisite, not
 -- an ordering dependency on another library in this list — see `mep.
 -- bib.bib`'s own header comment), so it's simply added at the end too.
+-- `todo` has no ordering dependency on anything else in this list
+-- either — it reads `mep.org.agenda`/`mep.sidebar` directly, only at
+-- panel-open time, not `setup()` time; its own `setup()` does bind a
+-- global `<leader>`-based keymap (`keymaps.toggle`), the same
+-- `<leader>`-resolved-at-definition-time constraint `whichkey`/`theme`/
+-- `notify` above are about, but since `sanity` is already first in this
+-- list, appending `todo` at the end trivially satisfies that too —
+-- simply added at the end.
 -- `theme` is listed right
 -- after `sanity`,
 -- deliberately, for two reasons that both point the same direction:
@@ -177,6 +186,7 @@ local CONFIGURABLE_LIBRARIES = {
   'zen',
   'clipboard',
   'bib',
+  'todo',
 }
 
 --- opts: `{ theme = {...}, sanity = {...}, dashboard = {...}, icons =
@@ -189,7 +199,7 @@ local CONFIGURABLE_LIBRARIES = {
 --- = {...}, hints = {...}, dap = {...}, docs = {...}, flashcards =
 --- {...}, help = {...}, colorizer = {...}, leetcode = {...}, roam =
 --- {...}, run = {...}, repl = {...}, snippet = {...}, todoscan = {...},
---- zen = {...}, clipboard = {...}, bib = {...} }` (all optional). Each sub-table is
+--- zen = {...}, clipboard = {...}, bib = {...}, todo = {...} }` (all optional). Each sub-table is
 --- forwarded to that library's own `setup()`; see `mep.<name>.config.
 --- defaults` for each library's shape. Note: mep.treesitter's default
 --- `ensure_installed = true` means this can kick off background
@@ -258,6 +268,7 @@ local LAZY_LIBRARIES = {
   zen = true,
   clipboard = true,
   bib = true,
+  todo = true,
   version = true,
 }
 

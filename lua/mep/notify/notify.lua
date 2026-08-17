@@ -228,11 +228,21 @@ function M.toggle()
   sb:toggle()
 end
 
+--- Bind `config.options.keymaps.toggle` globally to `M.toggle` — the
+--- standalone history panel, `mep.git.config.defaults.keymaps.
+--- toggle_sidebar`'s own global-keymap precedent.
+local function bind_global_keymaps()
+  for _, lhs in ipairs(config.options.keymaps.toggle) do
+    vim.keymap.set('n', lhs, M.toggle, { desc = 'mep.notify: toggle notification history panel' })
+  end
+end
+
 --- Configure `mep.notify` (see `mep.notify.config.defaults`) and
 --- install the `vim.notify` hook.
 function M.setup(opts)
   local options = config.setup(opts)
   M.install()
+  bind_global_keymaps()
   return options
 end
 

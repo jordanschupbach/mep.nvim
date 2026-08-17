@@ -196,18 +196,20 @@ describe('mep.chrome.tabline', function()
         package.loaded['mep.activitybar.git'] = fake('git')
         package.loaded['mep.filetree'] = fake('filetree')
         package.loaded['mep.symbols'] = fake('symbols')
+        package.loaded['mep.todo'] = fake('todo')
 
         for _, widget in ipairs(config.options.tabline.widgets_buttons) do
           widget.on_click()
         end
 
-        assert.are.same({ 'tests', 'notifications', 'git', 'filetree', 'symbols' }, calls)
+        assert.are.same({ 'tests', 'notifications', 'git', 'filetree', 'symbols', 'todo' }, calls)
 
         package.loaded['mep.activitybar.tests'] = nil
         package.loaded['mep.activitybar.notifications'] = nil
         package.loaded['mep.activitybar.git'] = nil
         package.loaded['mep.filetree'] = nil
         package.loaded['mep.symbols'] = nil
+        package.loaded['mep.todo'] = nil
       end)
 
       it('a button click is a harmless no-op when its target module has no toggle', function()
