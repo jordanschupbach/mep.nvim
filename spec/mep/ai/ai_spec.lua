@@ -395,7 +395,7 @@ describe('mep.ai', function()
       assert.is_nil(user_content:match('Instructions:'))
     end)
 
-    it('includes explicit instructions alongside the block, for gk-style calls', function()
+    it('includes explicit instructions alongside the block, when given (e.g. :MepAiSendSelectionPrompt)', function()
       config.setup({ provider = 'ollama', providers = { ollama = { model = 'llama3.2' } } })
       local buf = make_buf({ 'x = 1' })
       vim.api.nvim_set_current_buf(buf)
@@ -454,6 +454,53 @@ describe('mep.ai', function()
 
       assert.are.equal(1, starts)
       assert.matches('already streaming', notified)
+    end)
+  end)
+
+  describe('setup keymaps', function()
+    -- mep.ai's own keymaps are deliberately global, not buffer-local
+    -- (see mep.ai.ai's own M.setup comment) -- vim.keymap.set(...) here
+    -- really does register on the shared test Neovim instance, for
+    -- every one of the four keymap groups `M.setup` binds (not just the
+    -- one this test presses), so all of them have to come back off
+    -- again afterward, or they'd leak into every other spec file's own
+    -- key presses for the rest of this busted run. `config.defaults.
+    -- keymaps` is a plain array-shaped table per lhs group -- passing an
+    -- override `keymaps` table to `setup()` here would deep-merge by
+    -- index rather than replacing a whole group, so this deliberately
+    -- doesn't try to silence the other three groups via `keymaps = {...}`
+    -- and instead just tears down whatever the real defaults bound.
+    after_each(function()
+      pcall(vim.keymap.del, 'n', 'gl') -- keymaps.send
+      pcall(vim.keymap.del, 'x', 'gl') -- keymaps.replace_selection
+      pcall(vim.keymap.del, 'x', 'gk') -- keymaps.agent_prompt
+      pcall(vim.keymap.del, 'n', '<leader>ax') -- keymaps.cancel
+    end)
+
+    it('binds visual-mode replace_selection to M.send_selection, replacing the selection in place', function()
+      local options = ai.setup({ provider = 'ollama', providers = { ollama = { model = 'llama3.2' } } })
+
+      local buf = make_buf({ 'before', 'old one', 'old two', 'after' })
+      vim.api.nvim_set_current_buf(buf)
+
+      local on_delta_fn
+      job_mod.start = function(provider, messages, on_delta)
+        on_delta_fn = on_delta
+        return { kill = function() end }
+      end
+
+      vim.api.nvim_win_set_cursor(0, { 2, 0 })
+      vim.cmd('normal! Vj') -- visually select lines 2-3
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('gl', true, false, true), 'x', false)
+
+      -- left Visual mode, cleared the two selected lines to one
+      -- placeholder, same as calling M.send_selection(2, 3) directly
+      assert.are.equal('n', vim.fn.mode())
+      assert.are.same({ 'before', '', 'after' }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+
+      on_delta_fn('new one\nnew two')
+      assert.are.same({ 'before', 'new one', 'new two', 'after' }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+      assert.are.same({ 'gl' }, options.keymaps.replace_selection)
     end)
   end)
 

@@ -5,26 +5,26 @@
 --- buffer" UX real gptel has. `M.cancel()` (`:MepAiCancel`,
 --- `<leader>ax`) stops an in-flight request early.
 ---
---- `gl`/`gk` in *visual* mode are a different flow entirely, `mep.ai.
---- agent.start()` (this file just leaves Visual mode and delegates —
---- see `M.setup` below): a genuinely interactive, multi-turn, tool-
---- calling agent that opens `mep.ai.panel` (a persistent side panel) to
---- converse in, scoped to the selection as its editable target but
---- still given the whole buffer as context. `gl` gives it no
---- instructions beyond the block's own content (which may itself
---- contain them, e.g. a TODO comment) and its own judgment; `gk` first
---- opens a small floating-window prompt (`mep.ai.popup`) for an
---- explicit instruction to send alongside the block — both are real,
---- independent ways to direct it, exactly as asked for. See `mep.ai.
---- agent`'s own header comment for the full design (permissioned tools,
---- the panel, how an edit actually happens without a dedicated write
---- tool). `M.send_selection()` below (`:MepAiSendSelection`/
---- `:MepAiSendSelectionPrompt`, both range-aware) is the older, single-
---- shot version of a selection-scoped edit — no tools, no panel, no
---- back-and-forth, its response *replaces* the selection directly —
---- kept as a lower-level API (and its own commands) even though no
---- keymap points to it anymore, since a plain one-shot block rewrite is
---- still sometimes exactly what's wanted.
+--- `gl` in *visual* mode is `M.send_selection()` below (also
+--- `:MepAiSendSelection`, range-aware): a quick, single-shot rewrite of
+--- exactly the selected block — no tools, no panel, no back-and-forth.
+--- It's framed as an autonomous edit (`config.options.
+--- agent_system_prompt`) rather than `M.send`'s "simple call" framing,
+--- explicitly told to respond with *only* the block's replacement text
+--- (no explanation, no commentary, no markdown fences), and that
+--- response streams straight in *replacing* the selection, the same
+--- `stream_into` mechanism `M.send` uses just anchored at the start of
+--- the now-cleared block instead of the cursor. `gk` in visual mode is a
+--- different, heavier-weight flow: `mep.ai.agent.start()` (this file
+--- just leaves Visual mode and delegates — see `M.setup` below), a
+--- genuinely interactive, multi-turn, tool-calling agent that opens
+--- `mep.ai.panel` (a persistent side panel) to converse in, first
+--- prompting (`mep.ai.popup`) for an explicit instruction to send
+--- alongside the block. Reach for `gl` when you already know exactly
+--- what the block should become; `gk` when you want to discuss it or
+--- need the agent's tools (reading other files, running commands) to
+--- figure out the edit at all. See `mep.ai.agent`'s own header comment
+--- for that flow's full design.
 ---
 --- "Connect to an LLM" here means picking one of `mep.ai.config`'s named
 --- `providers` presets (`openai`, `anthropic`, both cloud APIs needing
@@ -299,8 +299,9 @@ end
 --- into an arbitrary column mid-line, which would be far more fragile
 --- for comparatively little real benefit here.
 ---
---- `opts.instructions`, if given (the `gk` popup's own use), is sent as
---- an explicit instruction alongside the block; without it (`gl`), the
+--- `opts.instructions`, if given (`:MepAiSendSelectionPrompt`'s own use,
+--- via `mep.ai.popup`), is sent as an explicit instruction alongside the
+--- block; without it (visual-mode `gl`, `:MepAiSendSelection`), the
 --- agent works from the block's own content alone (including any
 --- instructions already written inside it, e.g. a `TODO` comment) plus
 --- its own judgment. The block is cleared to one empty line *before*
@@ -400,31 +401,33 @@ end
 
 --- Configure mep.ai: binds `keymaps.send` in normal mode only (`M.send`
 --- — plain one-shot streaming, unaffected by anything below),
---- `keymaps.agent` in visual mode only (the full tool-calling agent,
---- `mep.ai.agent.start`, scoped to the selection, no extra instruction),
---- `keymaps.agent_prompt` in visual mode only (same, but opens `mep.ai.
---- popup` for an instruction first), and `keymaps.cancel` in normal
---- mode (`M.cancel` for a plain stream, `mep.ai.agent.cancel` for an
---- agent session's current turn) — none of them buffer/filetype-scoped,
---- this works in any buffer — see mep.ai.config.defaults. Registering
---- keymaps here is the only side effect; nothing here ever touches the
---- network until one of them is actually used.
+--- `keymaps.replace_selection` in visual mode only (`M.send_selection`,
+--- a quick single-shot rewrite of the selection with no extra
+--- instruction — see this file's own header comment), `keymaps.
+--- agent_prompt` in visual mode only (the full tool-calling agent,
+--- `mep.ai.agent.start`, opening `mep.ai.popup` for an instruction
+--- first), and `keymaps.cancel` in normal mode (`M.cancel` for a plain
+--- stream, `mep.ai.agent.cancel` for an agent session's current turn) —
+--- none of them buffer/filetype-scoped, this works in any buffer — see
+--- mep.ai.config.defaults. Registering keymaps here is the only side
+--- effect; nothing here ever touches the network until one of them is
+--- actually used.
 ---
---- `mep.ai.agent` is required lazily, inside the keymap callbacks
---- themselves, not at this file's own top level — it in turn requires
---- `mep.ai.ai` (for `M.resolve_provider`), and Lua's `require` cache
---- doesn't tolerate two modules requiring each other at load time.
+--- `mep.ai.agent` is required lazily, inside the `agent_prompt` keymap
+--- callback itself, not at this file's own top level — it in turn
+--- requires `mep.ai.ai` (for `M.resolve_provider`), and Lua's `require`
+--- cache doesn't tolerate two modules requiring each other at load time.
 function M.setup(opts)
   local options = config.setup(opts)
   for _, lhs in ipairs(options.keymaps.send) do
     vim.keymap.set('n', lhs, M.send, { desc = 'mep.ai: send buffer to the LLM' })
   end
-  for _, lhs in ipairs(options.keymaps.agent) do
+  for _, lhs in ipairs(options.keymaps.replace_selection) do
     vim.keymap.set('x', lhs, function()
       local start_line, end_line = visual_selection_lines()
-      vim.cmd('normal! \27') -- leave Visual mode before opening the panel
-      require('mep.ai.agent').start({ scope = { start_line, end_line } })
-    end, { desc = 'mep.ai: start an editing agent scoped to the visual selection' })
+      vim.cmd('normal! \27') -- leave Visual mode before editing the buffer
+      M.send_selection(start_line, end_line)
+    end, { desc = 'mep.ai: replace the visual selection in place with the LLM\'s response' })
   end
   for _, lhs in ipairs(options.keymaps.agent_prompt) do
     vim.keymap.set('x', lhs, function()

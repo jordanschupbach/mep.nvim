@@ -69,8 +69,8 @@ M.defaults = {
   -- Prepended as a `system`-role message ahead of the buffer's own
   -- content, when set. Left unset (no system message sent at all) by
   -- default. Only used by `mep.ai.send()` (the whole-buffer, "simple
-  -- call" path) — `mep.ai.send_selection()` (visual-mode `gl`/`gk`, an
-  -- editing agent scoped to the selection) always uses
+  -- call" path) — `mep.ai.send_selection()` (visual-mode `gl`, a quick
+  -- single-shot rewrite scoped to the selection) always uses
   -- `agent_system_prompt` below instead; the two are different enough
   -- in what they're asking the model to do that blending them didn't
   -- make sense.
@@ -91,15 +91,14 @@ M.defaults = {
     .. 'no preamble or postamble of any kind. Your entire response is inserted verbatim in place of the '
     .. 'original block.',
   -- The system prompt `mep.ai.agent` uses for the tool-calling,
-  -- multi-turn visual-mode `gl`/`gk` flow — distinct from
-  -- `agent_system_prompt` above (the older, single-shot "respond with
-  -- only the block's replacement text" flow `mep.ai.send_selection`
-  -- still offers as a lower-level API, just unbound from any keymap
-  -- now): this one frames an interactive session with tools available,
-  -- not a single fire-and-forget block edit, and explains that any real
-  -- file edit happens through `run_command` (see `mep.ai.tools` — there
-  -- is no dedicated write/edit tool) rather than by replying with
-  -- replacement text.
+  -- multi-turn visual-mode `gk` flow — distinct from
+  -- `agent_system_prompt` above (the quick, single-shot "respond with
+  -- only the block's replacement text" flow visual-mode `gl`/`mep.ai.
+  -- send_selection` uses instead): this one frames an interactive
+  -- session with tools available, not a single fire-and-forget block
+  -- edit, and explains that any real file edit happens through
+  -- `run_command` (see `mep.ai.tools` — there is no dedicated write/edit
+  -- tool) rather than by replying with replacement text.
   tool_agent_system_prompt = 'You are an autonomous coding agent working inside a Neovim session. You are given '
     .. 'the full contents of the current buffer as context and, for a call started from a visual selection, a '
     .. 'specific block within it as your editable target. You have tools available to read files, list '
@@ -124,17 +123,25 @@ M.defaults = {
     -- response in at the cursor — plain gptel-style one-shot completion,
     -- no tools, no panel. Unaffected by anything below.
     send = { 'gl' },
+    -- Visual mode only: `mep.ai.send_selection`, a quick single-shot
+    -- rewrite of exactly the selected block — no tools, no panel, no
+    -- back-and-forth, and no extra instruction beyond the block's own
+    -- content (which may itself contain one, e.g. a TODO comment) and
+    -- the model's own judgment. Told to respond with *only* the block's
+    -- replacement text (`agent_system_prompt` above), which streams in
+    -- replacing the selection directly, in place — same "no extra
+    -- prompt, land right where you are" semantic normal-mode `gl` has
+    -- always had, just scoped to the selection instead of the cursor.
+    replace_selection = { 'gl' },
     -- Visual mode only: the full tool-calling agent (`mep.ai.agent`,
-    -- opening `mep.ai.panel`), scoped to the selection as its editable
-    -- target but still seeing the whole buffer as context (see `mep.ai.
-    -- agent.start`'s own comment on why). No extra instruction beyond
-    -- the block's own content (which may itself contain one, e.g. a
-    -- TODO comment) and the agent's own judgment — same "no extra
-    -- prompt" semantic normal-mode `gl` has always had.
-    agent = { 'gl' },
-    -- Visual mode only: like `agent` above, but first opens a small
-    -- floating-window prompt (mep.ai.popup) for an extra instruction,
-    -- sent alongside the selected block.
+    -- opening `mep.ai.panel`) instead — heavier-weight than
+    -- `replace_selection` above: a real back-and-forth conversation,
+    -- with tools (reading other files, running commands) available to
+    -- figure out the edit rather than just reacting to the block's own
+    -- text. Opens a small floating-window prompt (mep.ai.popup) for an
+    -- extra instruction first, sent alongside the selected block (which
+    -- is still given as the agent's editable target, with the whole
+    -- buffer as context — see `mep.ai.agent.start`'s own comment).
     agent_prompt = { 'gk' },
     -- Cancel an in-flight request — a plain `mep.ai.send`/
     -- `send_selection` stream, or a `mep.ai.agent` session's current

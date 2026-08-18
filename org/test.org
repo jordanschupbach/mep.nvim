@@ -1,4 +1,13 @@
 
+
+* Lua
+#+BEGIN_SRC lua
+print("Hello, World!")
+#+END_SRC
+#+RESULTS:
+: Hello, World!
+
+
 * C++ Main File Example
 
 #+name: Hello, world in C++
@@ -11,7 +20,7 @@ int main() {
 }
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozz, world
 
 * C Main File Example
 
@@ -60,7 +69,7 @@ int main() {
 #+RESULTS:
 #+begin_example
 Sorted array: 
-1 5 8 9 10 17 
+1 5 8 9 11 17 
 #+end_example
 
 
@@ -218,12 +227,12 @@ pub fn main(init: std.process.Init) !void {
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
     const stdout = &stdout_writer.interface;
-    try stdout.writeAll("Hello, world\n");
+    try stdout.writeAll("Hellozzz, world\n");
     try stdout.flush();
 }
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozzz, world
 
 * Nim Example
 
@@ -291,7 +300,7 @@ print_string "Hello, world\n";;
 import std.stdio;
 
 void main() {
-    writeln("Hello, World!");
+    writeln("Hellozz, World!");
 }
 #+END_SRC
 #+RESULTS:

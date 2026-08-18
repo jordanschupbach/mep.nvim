@@ -2460,32 +2460,32 @@ UX real Emacs gptel has, not a separate chat window. `:MepAiCancel`
 streamed in stays. Works in any buffer — no filetype/language
 restriction.
 
-`gl`/`gk` in **visual** mode are a different flow entirely: a genuinely
-interactive, multi-turn, tool-calling agent (`mep.ai.agent`) that opens
-a persistent side panel to converse in, scoped to the selection as its
-editable target but still given the whole buffer as context (see
-"Tool-calling agent (visual-mode `gl`/`gk`)" below for the full
-picture). `gl` gives it nothing beyond the block's own content (which
-may itself carry instructions, e.g. a `TODO` comment) and its own
-judgment; `gk` first opens a small floating-window prompt for an
-explicit instruction to send alongside the block — both are real,
-independent ways to direct it, exactly the way normal-mode `gl` above
-takes no prompt and `gk` did before. `:MepAiAgent`/`:MepAiAgentPrompt`
-are the same two flows as range-aware commands
-(`:'<,'>MepAiAgent` works directly from Visual mode's own command line
-too).
-
-`mep.ai.send_selection()` (`:MepAiSendSelection`/
-`:MepAiSendSelectionPrompt`, both range-aware, no keymap bound to
-either anymore) is the *older*, single-shot version of a
-selection-scoped edit: no tools, no panel, no back-and-forth — it's
-told, in a dedicated system prompt (`agent_system_prompt`, distinct
+`gl` in **visual** mode is `mep.ai.send_selection()`
+(`:MepAiSendSelection`, also range-aware): a quick, single-shot rewrite
+of exactly the selected block — no tools, no panel, no back-and-forth.
+It's told, in a dedicated system prompt (`agent_system_prompt`, distinct
 from the plain `system_prompt` `mep.ai.send()` uses), to respond with
 *only* the block's replacement text (no explanation, no markdown code
 fences), and that response streams in *replacing* the selection
-directly. Kept as a lower-level API for when a plain one-shot block
-rewrite, with none of the tool-calling agent's overhead, is genuinely
-all that's wanted.
+directly — same "no prompt beyond the block's own content" semantic
+normal-mode `gl` already has, just landing at the selection instead of
+the cursor.
+
+`gk` in **visual** mode is the heavier-weight flow: a genuinely
+interactive, multi-turn, tool-calling agent (`mep.ai.agent`) that first
+opens a small floating-window prompt for an explicit instruction, then
+opens a persistent side panel to converse in, scoped to the selection as
+its editable target but still given the whole buffer as context (see
+"Tool-calling agent (visual-mode `gk`)" below for the full picture).
+Reach for `gl` when you already know exactly what the block should
+become; `gk` when you want to discuss it, or need the agent's tools
+(reading other files, running commands) to actually figure out the
+edit. `:MepAiAgentPrompt` is the same flow as a range-aware command
+(`:'<,'>MepAiAgentPrompt` works directly from Visual mode's own command
+line too); `:MepAiAgent` starts it with no prompt at all, and
+`:MepAiSendSelectionPrompt` is `gl`'s own flow with an explicit
+instruction prompted for first, same shape as `gk` but without the
+tools/panel.
 
 Genuinely asynchronous, not just "doesn't freeze the editor": you're
 free to switch buffers/windows, keep editing the buffer a `mep.ai.send`/
@@ -2567,7 +2567,7 @@ streams at a time — `:MepAiSend` while another is still in flight
 refuses instead of racing two responses into the same buffer position.
 
 ```lua
-require('mep.ai').setup({}) -- keymaps: send/agent={'gl'}, agent_prompt={'gk'}, cancel={'<leader>ax'}; provider={'openai','anthropic','ollama'}
+require('mep.ai').setup({}) -- keymaps: send/replace_selection={'gl'}, agent_prompt={'gk'}, cancel={'<leader>ax'}; provider={'openai','anthropic','ollama'}
 require('mep.ai').setup({ provider = 'anthropic' }) -- always this one, prompting for a key if ANTHROPIC_API_KEY isn't set
 require('mep.ai').setup({ provider = { 'anthropic', 'ollama' } }) -- your own, shorter fallback list
 require('mep.ai').setup({ system_prompt = 'Answer tersely.' }) -- prepended as a system message, unset by default
@@ -2602,9 +2602,9 @@ streaming flows): sends the buffer's/selection's text as a `user`
 message and streams one response back — no multi-turn conversation
 history, no tool-calling. See below for the flow that has both.
 
-#### Tool-calling agent (visual-mode `gl`/`gk`)
+#### Tool-calling agent (visual-mode `gk`)
 
-`mep.ai.agent.start()` — what visual-mode `gl`/`gk` actually trigger —
+`mep.ai.agent.start()` — what visual-mode `gk` actually triggers —
 is a real, interactive, multi-turn session: it opens `mep.ai.panel` (a
 persistent side panel, `mep.sidebar`-based, the same building block
 `mep.git`'s own status panel and `mep.activitybar`'s flyouts use) and

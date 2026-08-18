@@ -1,4 +1,4 @@
---- The tool-calling orchestration loop behind visual-mode `gl`/`gk` (see
+--- The tool-calling orchestration loop behind visual-mode `gk` (see
 --- `mep.ai.ai`'s own `M.setup` for the keymap wiring) — where `mep.ai.
 --- send`/`send_selection` are each one fire-and-forget request,
 --- `M.start` here begins a genuinely multi-turn session: request, maybe
@@ -241,10 +241,10 @@ end
 --- (see this module's own header comment, and the design goal it
 --- traces back to: "still by default send the current buffer as
 --- context"). `opts.instructions`, when given (the `gk` popup's own
---- use), is sent as an explicit instruction; without it (`gl`), the
---- agent works from the buffer/block's own content and its own
---- judgment alone, same "no extra prompt" semantic plain `gl` has
---- always had. `opts.provider` defaults to `config.options.provider`.
+--- use), is sent as an explicit instruction; without it (a plain
+--- `:MepAiAgent` call), the agent works from the buffer/block's own
+--- content and its own judgment alone. `opts.provider` defaults to
+--- `config.options.provider`.
 --- Opens (or re-targets) `mep.ai.panel` on the new session and kicks
 --- off its first turn. Returns the new session, or nil (after a
 --- notification) if no provider is ready to use.
