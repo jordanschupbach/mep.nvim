@@ -350,8 +350,20 @@ local function bind_keymaps(bufnr, options)
     agenda.dispatch_interactive(options)
   end, 'Open the agenda')
 
+  -- Wired through polyglot.on_block_executed (a no-op when polyglot isn't
+  -- set up for this buffer, or the block's language has no per-block
+  -- shadow — see its own comment) so a c/cpp block's compile_commands.json
+  -- gets regenerated from the real compile invocation right after it
+  -- actually runs, without babel.lua itself needing any awareness of
+  -- polyglot at all.
+  local function execute_babel_block(lnum)
+    babel.execute(bufnr, lnum, function()
+      polyglot.on_block_executed(bufnr, lnum)
+    end)
+  end
+
   map_all('n', keymaps.babel_execute, function()
-    babel.execute(bufnr, cursor_line())
+    execute_babel_block(cursor_line())
   end, 'Execute the src block at the cursor')
   map_all('n', keymaps.babel_tangle, function()
     babel.tangle_buffer(bufnr)
@@ -360,7 +372,7 @@ local function bind_keymaps(bufnr, options)
   map_all('n', keymaps.ctrl_c_ctrl_c, function()
     local lnum = cursor_line()
     if babel.at_cursor(bufnr, lnum) then
-      babel.execute(bufnr, lnum)
+      execute_babel_block(lnum)
       return
     end
     local line = vim.api.nvim_buf_get_lines(bufnr, lnum - 1, lnum, false)[1]

@@ -1400,12 +1400,16 @@ structure editing below works immediately, even before (or without) the
     since that's the common case for a block worth pasting into a src
     block at all; deliberately not execution-accurate either way (no
     `:includes` handling: `#include`/Go's `import` need their own
-    physical line, with no legal way to share one with the wrapper) and,
-    since a shadow buffer merges every block of one language into a
-    single file, limited to one wrapped (`:main yes`) block per language
-    per org file — a second one collides on the entry point, the same
-    "only one real program at a time" constraint real org-babel's own
-    execution model already has. Two servers
+    physical line, with no legal way to share one with the wrapper). For
+    rust/go/php, a shadow buffer still merges every block of one language
+    into a single file, so only one wrapped (`:main yes`) block per
+    language per org file is supported — a second one collides on the
+    entry point, the same "only one real program at a time" constraint
+    real org-babel's own execution model already has. **c/cpp are the
+    exception**: each block gets its own shadow buffer (one per block,
+    not one shared per language), so any number of `:main yes` C/C++
+    blocks in one file work independently — see the `compile_commands.
+    json` paragraph below for why. Two servers
     specifically (confirmed empirically) need more than a client
     attaching to make any of this work at all: rust-analyzer shells out to
     `cargo metadata`/`cargo check` for its own workspace discovery, and
@@ -1420,6 +1424,34 @@ structure editing below works immediately, even before (or without) the
     about the open buffer. A blanket `.gitignore` (`*`) written alongside
     keeps all of it out of your own repo; the whole `.mep-polyglot/`
     scaffold directory is removed again when the org buffer closes.
+    **c/cpp (clangd) needs a `compile_commands.json`** to know how to
+    parse a translation unit at all — without one, `#include <iostream>`
+    and everything downstream just fails to resolve (clangd falls back to
+    guessed flags with no system include paths). Rather than scattering
+    one across the whole file (clangd's flags are per-file, not
+    per-line-range — a single shared compile database entry couldn't
+    describe several independent little programs correctly anyway), each
+    c/cpp block gets its own shadow buffer *and* its own scratch directory
+    under `stdpath('cache')/mep-polyglot/<bufnr>/<c|cpp>/block_<lnum>/`
+    (an OS cache directory, deliberately not next to your project at all
+    — nothing to `.gitignore`, nothing to see in `ls`). clangd attaches
+    with no flags at all the first time you visit a block, same as always;
+    only after you actually run it (`<C-c><C-c>`/`<C-c>e`) does that
+    block's own `compile_commands.json` get (re)generated from the exact
+    compiler `mep.org.babel.execute` itself resolved, and clangd gets a
+    `workspace/didChangeWatchedFiles` nudge so it reloads and reparses
+    immediately — no client restart. This still won't resolve a *missing*
+    `#include` in a synthetically-wrapped (`:main yes`) block's own text
+    (a separate, pre-existing limitation — see the `:main yes` paragraph
+    above); a self-contained (`:main no`, the default) block that already
+    writes its own real `#include`s is fully covered. `mep.lsp` itself
+    also appends a `--query-driver=...` flag to clangd's `cmd`, scoped to
+    wherever `gcc`/`g++`/`cc`/`c++`/`clang`/`clang++` actually resolve on
+    your own `PATH` — needed for clangd to discover the real compiler's
+    system include paths at all on a system (NixOS being the standing
+    example) where they aren't wherever clangd's own built-in defaults
+    expect; skipped entirely if none of those resolve, and never
+    overrides a `--query-driver` you've already set yourself.
     `gd`/`gD`/`gr`/`gi`/`K`/`<C-k>`/`<leader>rn`/`[d`/`]d`/
     `<leader>le` (mirroring `mep.lsp`'s own keymap vocabulary) work
     inside a block using that language's client; outside of one, they
@@ -1933,6 +1965,23 @@ server's install path is wildly heterogeneous — npm, pip, go install,
 cargo, curl+prebuilt binary — with no single zero-dependency mechanism
 covering all of them): install the servers you want yourself, however
 your package manager of choice wants to.
+
+One server gets a small per-machine augmentation before registration:
+`clangd`'s `cmd` has `--query-driver=<dir>/**` appended for every one of
+`gcc`/`g++`/`cc`/`c++`/`clang`/`clang++` this machine's own `PATH` actually
+resolves (`vim.fn.exepath`, deduped by directory) — without it, clangd
+can't discover a real compiler's system include paths on a system (NixOS
+being the standing example, but this isn't Nix-specific) where they aren't
+wherever clangd's own built-in defaults expect, so `#include <iostream>`
+and everything downstream just fails to resolve. Scoped to this machine's
+own resolved compiler paths rather than a blanket `--query-driver=**`
+(clangd would otherwise execute *any* compiler named in *any*
+`compile_commands.json` it finds, in any project you open); skipped
+entirely if none of those resolve, and never overrides a `--query-driver`
+you've already set yourself via `options.servers.clangd` or a fully custom
+`cmd`. See `mep.org.polyglot`'s own section above for the other half of
+this — c/cpp org babel blocks generating their own `compile_commands.json`
+after you actually run them.
 
 On `LspAttach`, binds the classic `gd`/`gD`/`gr`/`gi`/`K` vocabulary
 (`mep.lsp.keymaps` — nvim-lspconfig's own long-standing example config

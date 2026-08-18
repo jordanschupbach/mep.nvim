@@ -202,6 +202,137 @@ describe('mep.lsp.lsp', function()
     end)
   end)
 
+  describe('clangd --query-driver', function()
+    local orig_exepath, orig_fnamemodify
+
+    before_each(function()
+      orig_exepath = vim.fn.exepath
+      orig_fnamemodify = vim.fn.fnamemodify
+    end)
+
+    after_each(function()
+      vim.fn.exepath = orig_exepath
+      vim.fn.fnamemodify = orig_fnamemodify
+    end)
+
+    it('appends --query-driver scoped to resolved compiler directories', function()
+      vim.fn.exepath = function(exe)
+        if exe == 'gcc' or exe == 'g++' then
+          return '/opt/toolchain/bin/' .. exe
+        end
+        return ''
+      end
+      local registered = {}
+      vim.lsp.config = function(name, cfg)
+        registered[name] = cfg
+      end
+      vim.lsp.enable = function() end
+      vim.diagnostic.config = function() end
+
+      lsp_mod.setup({})
+
+      assert.are.same({ 'clangd', '--query-driver=/opt/toolchain/bin/**' }, registered.clangd.cmd)
+    end)
+
+    it('dedupes directories shared by more than one resolved compiler name', function()
+      vim.fn.exepath = function(exe)
+        if exe == 'gcc' or exe == 'cc' then
+          return '/usr/bin/' .. exe
+        end
+        return ''
+      end
+      local registered = {}
+      vim.lsp.config = function(name, cfg)
+        registered[name] = cfg
+      end
+      vim.lsp.enable = function() end
+      vim.diagnostic.config = function() end
+
+      lsp_mod.setup({})
+
+      assert.are.same({ 'clangd', '--query-driver=/usr/bin/**' }, registered.clangd.cmd)
+    end)
+
+    it('does not touch any other server\'s cmd', function()
+      vim.fn.exepath = function(exe)
+        return exe == 'gcc' and '/usr/bin/gcc' or ''
+      end
+      local registered = {}
+      vim.lsp.config = function(name, cfg)
+        registered[name] = cfg
+      end
+      vim.lsp.enable = function() end
+      vim.diagnostic.config = function() end
+
+      lsp_mod.setup({})
+
+      assert.are.same({ 'gopls' }, registered.gopls.cmd)
+      assert.are.same({ 'pyright-langserver', '--stdio' }, registered.pyright.cmd)
+    end)
+
+    it('appends nothing when no compiler resolves on PATH', function()
+      vim.fn.exepath = function()
+        return ''
+      end
+      local registered = {}
+      vim.lsp.config = function(name, cfg)
+        registered[name] = cfg
+      end
+      vim.lsp.enable = function() end
+      vim.diagnostic.config = function() end
+
+      lsp_mod.setup({})
+
+      assert.are.same({ 'clangd' }, registered.clangd.cmd)
+    end)
+
+    it('never duplicates a --query-driver a custom clangd override already set', function()
+      vim.fn.exepath = function(exe)
+        return exe == 'gcc' and '/usr/bin/gcc' or ''
+      end
+      local registered = {}
+      vim.lsp.config = function(name, cfg)
+        registered[name] = cfg
+      end
+      vim.lsp.enable = function() end
+      vim.diagnostic.config = function() end
+
+      lsp_mod.setup({ servers = { clangd = { cmd = { 'clangd', '--query-driver=/custom/**' }, filetypes = { 'cpp' }, root_markers = { '.git' } } } })
+
+      assert.are.same({ 'clangd', '--query-driver=/custom/**' }, registered.clangd.cmd)
+    end)
+
+    it('leaves a fully custom (non-stock) clangd cmd untouched', function()
+      vim.fn.exepath = function(exe)
+        return exe == 'gcc' and '/usr/bin/gcc' or ''
+      end
+      local registered = {}
+      vim.lsp.config = function(name, cfg)
+        registered[name] = cfg
+      end
+      vim.lsp.enable = function() end
+      vim.diagnostic.config = function() end
+
+      lsp_mod.setup({ servers = { clangd = { cmd = { '/my/own/clangd-wrapper' }, filetypes = { 'cpp' }, root_markers = { '.git' } } } })
+
+      assert.are.same({ '/my/own/clangd-wrapper' }, registered.clangd.cmd)
+    end)
+
+    it('does not mutate a user-supplied servers.clangd table in place', function()
+      vim.fn.exepath = function(exe)
+        return exe == 'gcc' and '/usr/bin/gcc' or ''
+      end
+      vim.lsp.config = function() end
+      vim.lsp.enable = function() end
+      vim.diagnostic.config = function() end
+
+      local user_cfg = { cmd = { 'clangd' }, filetypes = { 'cpp' }, root_markers = { '.git' } }
+      lsp_mod.setup({ servers = { clangd = user_cfg } })
+
+      assert.are.same({ 'clangd' }, user_cfg.cmd)
+    end)
+  end)
+
   describe('LspAttach wiring', function()
     it('binds keymaps for the attaching client', function()
       vim.lsp.config = function() end

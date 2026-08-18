@@ -30,10 +30,12 @@
 --- the shadow buffer's text current automatically, the same as any real
 --- edited buffer, whenever `sync` rewrites its lines.
 ---
---- A given language's shadow buffer is only ever created the first time
---- the cursor actually lands inside one of its blocks (`context_at_cursor`
---- creates it lazily on demand) — *not* proactively for every language
---- `sync` sees in the buffer. Since creating one is exactly what triggers
+--- A given language's shadow buffer (for `PER_BLOCK_LANGS` — c/cpp, see
+--- its own comment — one per *block* rather than one shared per language)
+--- is only ever created the first time the cursor actually lands inside
+--- one of its blocks (`context_at_cursor` creates it lazily on demand) —
+--- *not* proactively for every language `sync` sees in the buffer. Since
+--- creating one is exactly what triggers
 --- real-server autostart above, eager creation would silently start (and
 --- let attach) a real language server for every src-block language the
 --- instant an org buffer is opened, whether or not the user ever visits
@@ -132,14 +134,14 @@ end
 --- directive lines with no legal way to share a line with `open` — C's
 --- preprocessor in particular requires a directive to be alone on its
 --- physical line — so a missing header still shows as its own, more
---- sensible "implicit declaration" diagnostic instead) and no support
---- for more than one wrapped block (see `babel.should_wrap_main`) of the
---- *same* entry-point language in one org file (each gets its own
---- `open`/`close`, so two would both try to define `main` in the same
---- shadow buffer — the
---- identical "only one real program at a time" constraint real
---- org-babel's own wrap-at-execution already implies, just surfaced
---- earlier here).
+--- sensible "implicit declaration" diagnostic instead). Real org-babel's
+--- own "only one real program at a time" constraint (`babel.
+--- should_wrap_main`) — two `:main yes` blocks of the same entry-point
+--- language would both try to define `main` — no longer applies to c/cpp
+--- here: `PER_BLOCK_LANGS` (below) gives each of *those* its own shadow
+--- buffer, so two wrapped C++ blocks each get their own `open`/`close`
+--- rather than colliding in one shared buffer. Still applies to rust/go/
+--- php, which remain one shared shadow buffer per language.
 local ENTRY_WRAPPERS = {
   c = { open = 'int main(void) {', close = 'return 0; }' },
   cpp = { open = 'int main() {', close = 'return 0; }' },
@@ -166,10 +168,25 @@ local ENTRY_WRAPPERS = {
   php = { open = '<?php', close = '' },
 }
 
+--- Languages that get one shadow buffer PER SRC BLOCK instead of one
+--- shared shadow buffer for the whole org file: each c/cpp block is its
+--- own independent translation unit that may want its own compile flags
+--- (a `compile_commands.json` entry naming *that block's own* shadow
+--- file — see `M.on_block_executed`), which a single shared shadow buffer
+--- covering every c/cpp block in the file couldn't give correctly even in
+--- principle (clangd's flags are per-file, not per-line-range). This is
+--- also what lifts `ENTRY_WRAPPERS`' own "only one `:main yes` block per
+--- language" limitation for c/cpp specifically (see its own comment).
+local PER_BLOCK_LANGS = { c = true, cpp = true }
+
 --- Every language currently in `raw_lang`'s block(s), rebuilt as
 --- `#total_lines` lines: blank except where `bufnr`'s own src blocks in
 --- that language put real body text, at their own original line numbers.
-local function shadow_lines_for(bufnr, target_ft)
+--- `only_start_lnum`, if given, restricts this to just the one block
+--- starting there — used by `PER_BLOCK_LANGS`' own per-block shadow
+--- buffers, each of which should only ever show its own block's body, not
+--- every other block of the same language merged in too.
+local function shadow_lines_for(bufnr, target_ft, only_start_lnum)
   local total = vim.api.nvim_buf_line_count(bufnr)
   local lines = {}
   for i = 1, total do
@@ -177,7 +194,7 @@ local function shadow_lines_for(bufnr, target_ft)
   end
   local wrapper = ENTRY_WRAPPERS[target_ft]
   for _, block in ipairs(babel.find_blocks(bufnr)) do
-    if lang.to_filetype(block.lang) == target_ft then
+    if lang.to_filetype(block.lang) == target_ft and (not only_start_lnum or block.start_lnum == only_start_lnum) then
       for k, body_line in ipairs(block.body) do
         lines[block.start_lnum + k] = body_line
       end
@@ -201,16 +218,41 @@ local function scaffold_root(org_bufnr)
   return string.format('%s/.mep-polyglot/%d', dir, org_bufnr)
 end
 
---- Directory + full path for a shadow buffer — `<scaffold_root>/<ft>/
---- shadow<ext>`, one subdirectory per language so a real on-disk
---- manifest (`MANIFESTS` below) can live alongside it without colliding
---- with any other language's own. For most languages the shadow buffer's
---- own *content* is never actually written here — see
+--- `PER_BLOCK_LANGS`' own scaffold root: a real OS cache directory
+--- (`stdpath('cache')`), deliberately *not* next to the project the way
+--- `scaffold_root` above is — c/cpp's own scaffolding (a shadow file per
+--- block, plus its `compile_commands.json`) is entirely self-contained
+--- (the compile command names its own absolute paths), so it never needs
+--- to sit next to the real project for root-marker discovery the way
+--- `scaffold_root`'s own doc comment explains non-`MANIFESTS` languages
+--- do — and keeping it out of the project directory entirely avoids
+--- cluttering it, even as a git-ignored dotfile.
+local function cache_scaffold_root(org_bufnr)
+  return string.format('%s/mep-polyglot/%d', vim.fn.stdpath('cache'), org_bufnr)
+end
+
+--- Directory + full path for a shadow buffer — `<root>/<ft>/shadow<ext>`,
+--- one subdirectory per language (`scaffold_root`) or per block
+--- (`per_block_shadow_path`, below, `PER_BLOCK_LANGS` only) so a real
+--- on-disk manifest (`MANIFESTS` below, or a c/cpp `compile_commands.
+--- json` — see `M.on_block_executed`) can live alongside it without
+--- colliding with any other language's/block's own. For most languages
+--- the shadow buffer's own *content* is never actually written here — see
 --- `get_or_create_shadow` below for how that's enforced despite needing
 --- `buftype=''` — `MANIFESTS`-listed ones are the one exception (see
 --- `M.sync`'s own comment for why).
 local function shadow_path(root, ft, ext)
   local dir = root .. '/' .. ft
+  return dir, dir .. '/shadow' .. ext
+end
+
+--- `per_block_shadow_path`: like `shadow_path`, but one directory per
+--- block (keyed by its own `start_lnum`, the same "stable enough, keyed
+--- by start_lnum" convention `mep.org.babel.cache_key` already uses for
+--- exactly the same "identify a block across syncs" problem) rather than
+--- one shared directory for the whole language — `PER_BLOCK_LANGS` only.
+local function per_block_shadow_path(root, ft, ext, block)
+  local dir = string.format('%s/%s/block_%d', root, ft, block.start_lnum)
   return dir, dir .. '/shadow' .. ext
 end
 
@@ -270,20 +312,13 @@ local function ensure_manifest(root, dir, ft, shadow_basename)
   end
 end
 
-local function get_or_create_shadow(org_bufnr, raw_lang)
-  local ft = lang.to_filetype(raw_lang)
-  if not ft then
-    return nil
-  end
-  local st = state[org_bufnr]
-  local shadow = st.shadow[ft]
-  if shadow and vim.api.nvim_buf_is_valid(shadow) then
-    return shadow
-  end
-  local dir, path = shadow_path(st.scaffold_root, ft, lang.to_extension(raw_lang))
-  ensure_manifest(st.scaffold_root, dir, ft, vim.fn.fnamemodify(path, ':t'))
-  st.shadow_paths[ft] = path
-  shadow = vim.api.nvim_create_buf(false, true)
+--- Creates the actual hidden buffer for a shadow file at `path`, with
+--- every attribute/autocmd real-server LSP attach and safe teardown both
+--- depend on — shared by every shadow buffer, whether it's
+--- `PER_BLOCK_LANGS`' own one-per-block kind or the ordinary
+--- one-per-language kind.
+local function new_shadow_buffer(org_bufnr, path, ft)
+  local shadow = vim.api.nvim_create_buf(false, true)
   -- Deliberately `buftype = ''` (a real/"normal" buffer), not the more
   -- obvious `'nofile'` — confirmed empirically (and in Neovim's own
   -- source, `lsp_enable_callback` in runtime/lua/vim/lsp.lua: "Only ever
@@ -312,7 +347,6 @@ local function get_or_create_shadow(org_bufnr, raw_lang)
   -- mep.lsp.setup, or your own LSP config) listens on to auto-attach.
   vim.bo[shadow].filetype = ft
   vim.bo[shadow].modified = false
-  st.shadow[ft] = shadow
   shadow_owner[shadow] = org_bufnr
   vim.api.nvim_create_autocmd('BufWriteCmd', {
     buffer = shadow,
@@ -333,44 +367,113 @@ local function get_or_create_shadow(org_bufnr, raw_lang)
   return shadow
 end
 
+--- Finds (or lazily creates) the shadow buffer for a src block written in
+--- `raw_lang`. For `PER_BLOCK_LANGS` (c/cpp), `block` identifies *which*
+--- block's own shadow this is — `st.shadow[ft]` is a `{ [block_key] =
+--- { bufnr, dir, path } }` table in that case (one entry per block,
+--- `block_key` its own `start_lnum`), rather than the single shared bufnr
+--- every other language uses. Deliberately writes no `compile_commands.
+--- json`/manifest here for `PER_BLOCK_LANGS` — that's `M.on_block_
+--- executed`'s own job, so clangd attaches with no flags at all the first
+--- time (same as every other language always has) and only gets real
+--- ones once the block has actually been run.
+local function get_or_create_shadow(org_bufnr, raw_lang, block)
+  local ft = lang.to_filetype(raw_lang)
+  if not ft then
+    return nil
+  end
+  local st = state[org_bufnr]
+
+  if PER_BLOCK_LANGS[ft] then
+    local block_key = tostring(block.start_lnum)
+    st.shadow[ft] = st.shadow[ft] or {}
+    local entry = st.shadow[ft][block_key]
+    if entry and vim.api.nvim_buf_is_valid(entry.bufnr) then
+      return entry.bufnr
+    end
+    local dir, path = per_block_shadow_path(st.cache_root, ft, lang.to_extension(raw_lang), block)
+    pcall(vim.fn.mkdir, dir, 'p')
+    local shadow = new_shadow_buffer(org_bufnr, path, ft)
+    st.shadow[ft][block_key] = { bufnr = shadow, dir = dir, path = path }
+    return shadow
+  end
+
+  local shadow = st.shadow[ft]
+  if shadow and vim.api.nvim_buf_is_valid(shadow) then
+    return shadow
+  end
+  local dir, path = shadow_path(st.scaffold_root, ft, lang.to_extension(raw_lang))
+  ensure_manifest(st.scaffold_root, dir, ft, vim.fn.fnamemodify(path, ':t'))
+  st.shadow_paths[ft] = path
+  shadow = new_shadow_buffer(org_bufnr, path, ft)
+  st.shadow[ft] = shadow
+  return shadow
+end
+
+--- Diffs `lines` against `shadow`'s current content and, only if changed,
+--- writes them in and clears `modified` right back off — buftype=''
+--- (required for LSP autostart to consider this buffer at all — see
+--- `get_or_create_shadow`) means the write itself sets `modified`, which
+--- would otherwise make this fake, never-saved buffer block `:qa`/`:wqa`
+--- with "No write since last change". Shared by `M.sync`'s two branches
+--- below (one shared shadow buffer per language vs. `PER_BLOCK_LANGS`'
+--- own one per block).
+local function sync_shadow_buffer(shadow, lines)
+  if not vim.deep_equal(vim.api.nvim_buf_get_lines(shadow, 0, -1, false), lines) then
+    vim.api.nvim_buf_set_lines(shadow, 0, -1, false, lines)
+    vim.bo[shadow].modified = false
+    return true
+  end
+  return false
+end
+
 --- Rewrites the content of every shadow buffer already tracked for
 --- `bufnr` (including one whose language no longer appears in the buffer
 --- — left all-blank rather than deleted, so a language removed and then
 --- re-added in the same editing session doesn't repeatedly tear down and
 --- reattach a client) from its current src blocks. Deliberately never
---- creates a *new* shadow buffer for a language sync sees but hasn't
---- tracked yet — see this module's own header comment for why that's
---- `context_at_cursor`'s job, lazily, instead.
+--- creates a *new* shadow buffer for a language/block sync sees but
+--- hasn't tracked yet — see this module's own header comment for why
+--- that's `context_at_cursor`'s job, lazily, instead.
 function M.sync(bufnr)
   local st = state[bufnr]
   if not st then
     return
   end
-  for ft, shadow in pairs(st.shadow) do
-    if vim.api.nvim_buf_is_valid(shadow) then
-      local lines = shadow_lines_for(bufnr, ft)
-      if not vim.deep_equal(vim.api.nvim_buf_get_lines(shadow, 0, -1, false), lines) then
-        vim.api.nvim_buf_set_lines(shadow, 0, -1, false, lines)
-        -- buftype='' (required for LSP autostart to consider this buffer
-        -- at all — see get_or_create_shadow) means this edit just set
-        -- 'modified'; force it back off so this fake, never-saved buffer
-        -- never blocks :qa/:wqa with "No write since last change".
-        vim.bo[shadow].modified = false
-        -- MANIFESTS-listed languages (rust, go) get their content
-        -- mirrored to real disk too, the one exception to "a shadow
-        -- buffer's content never touches disk" — confirmed empirically
-        -- that this is unavoidable for them specifically: their
-        -- MANIFESTS scaffold makes `vim.lsp.enable` and rust-analyzer/
-        -- gopls agree a real project exists here at all, but a build-
-        -- system-backed workspace load (`cargo check` for rust-analyzer;
-        -- confirmed via a literal `error: can't find bin ... at path`)
-        -- still separately validates that path *on disk*, independent of
-        -- anything Neovim's LSP client has told it about the open
-        -- buffer's own in-memory content. `ensure_manifest` already
-        -- wrote a blanket `.gitignore` (`*`) into this org buffer's own
-        -- scaffold_root, so this never leaks into the user's own repo.
-        if MANIFESTS[ft] and st.shadow_paths[ft] then
-          pcall(vim.fn.writefile, lines, st.shadow_paths[ft])
+  for ft, shadow_or_entries in pairs(st.shadow) do
+    if PER_BLOCK_LANGS[ft] then
+      -- One shadow buffer per block (see PER_BLOCK_LANGS' own comment):
+      -- `shadow_or_entries` is `{ [block_key] = { bufnr, dir, path } }`,
+      -- each synced against just its own block (`shadow_lines_for`'s
+      -- `only_start_lnum`) — never mirrored to real disk, unlike
+      -- MANIFESTS below, since c/cpp's shadow content only ever matters
+      -- to the in-memory LSP client, not any build tooling.
+      for block_key, entry in pairs(shadow_or_entries) do
+        if vim.api.nvim_buf_is_valid(entry.bufnr) then
+          sync_shadow_buffer(entry.bufnr, shadow_lines_for(bufnr, ft, tonumber(block_key)))
+        end
+      end
+    else
+      local shadow = shadow_or_entries
+      if vim.api.nvim_buf_is_valid(shadow) then
+        local lines = shadow_lines_for(bufnr, ft)
+        if sync_shadow_buffer(shadow, lines) then
+          -- MANIFESTS-listed languages (rust, go) get their content
+          -- mirrored to real disk too, the one exception to "a shadow
+          -- buffer's content never touches disk" — confirmed empirically
+          -- that this is unavoidable for them specifically: their
+          -- MANIFESTS scaffold makes `vim.lsp.enable` and rust-analyzer/
+          -- gopls agree a real project exists here at all, but a build-
+          -- system-backed workspace load (`cargo check` for rust-analyzer;
+          -- confirmed via a literal `error: can't find bin ... at path`)
+          -- still separately validates that path *on disk*, independent of
+          -- anything Neovim's LSP client has told it about the open
+          -- buffer's own in-memory content. `ensure_manifest` already
+          -- wrote a blanket `.gitignore` (`*`) into this org buffer's own
+          -- scaffold_root, so this never leaks into the user's own repo.
+          if MANIFESTS[ft] and st.shadow_paths[ft] then
+            pcall(vim.fn.writefile, lines, st.shadow_paths[ft])
+          end
         end
       end
     end
@@ -399,15 +502,76 @@ function M.context_at_cursor(bufnr, lnum)
   if not ft then
     return nil
   end
-  local shadow = st.shadow[ft]
+
+  local shadow
+  if PER_BLOCK_LANGS[ft] then
+    local entry = st.shadow[ft] and st.shadow[ft][tostring(block.start_lnum)]
+    shadow = entry and entry.bufnr
+  else
+    shadow = st.shadow[ft]
+  end
   if not shadow or not vim.api.nvim_buf_is_valid(shadow) then
-    shadow = get_or_create_shadow(bufnr, block.lang)
+    shadow = get_or_create_shadow(bufnr, block.lang, block)
     if not shadow then
       return nil
     end
     M.sync(bufnr)
   end
   return { shadow_bufnr = shadow, ft = ft, block = block }
+end
+
+--- Called after `mep.org.babel.execute` finishes running the src block at
+--- `lnum` (wired from `mep.org.org`'s own babel-execute keymaps). For
+--- `PER_BLOCK_LANGS` (c/cpp), regenerates that block's own `compile_
+--- commands.json` to match exactly what babel just compiled (same
+--- compiler `mep.org.babel.execute` itself resolves, via `babel.
+--- resolve_executable`) and notifies its shadow buffer's attached
+--- client(s) that the file changed, so clangd reloads its compilation
+--- database and reparses the already-open shadow buffer with real flags
+--- — no client restart needed: `workspace/didChangeWatchedFiles` is the
+--- protocol-correct way to tell a server an on-disk file it cares about
+--- changed. A no-op if polyglot isn't set up for `bufnr`, the block at
+--- `lnum` isn't found, its language isn't `PER_BLOCK_LANGS`, its shadow
+--- was never created (cursor never visited it — nothing to attach flags
+--- to yet), or no compiler was resolved (mirrors `M.execute`'s own
+--- graceful-miss). Deliberately runs regardless of the block's own exit
+--- code — the compile *command* it documents doesn't depend on whether
+--- this particular run happened to fail.
+function M.on_block_executed(bufnr, lnum)
+  local st = state[bufnr]
+  if not st then
+    return
+  end
+  local block = babel.at_cursor(bufnr, lnum)
+  if not block then
+    return
+  end
+  local ft = lang.to_filetype(block.lang)
+  if not ft or not PER_BLOCK_LANGS[ft] then
+    return
+  end
+  local entry = st.shadow[ft] and st.shadow[ft][tostring(block.start_lnum)]
+  if not entry or not vim.api.nvim_buf_is_valid(entry.bufnr) then
+    return
+  end
+  local lang_def = babel.languages[block.lang:lower()]
+  local exe = lang_def and babel.resolve_executable(lang_def)
+  if not exe then
+    return
+  end
+
+  local cdb_path = entry.dir .. '/compile_commands.json'
+  pcall(vim.fn.writefile, {
+    vim.json.encode({
+      { directory = entry.dir, file = entry.path, arguments = { exe, '-c', entry.path } },
+    }),
+  }, cdb_path)
+
+  for _, client in ipairs(vim.lsp.get_clients({ bufnr = entry.bufnr })) do
+    client:notify('workspace/didChangeWatchedFiles', {
+      changes = { { uri = vim.uri_from_fname(cdb_path), type = 2 } }, -- 2 = Changed
+    })
+  end
 end
 
 local function clients_for(shadow_bufnr, method)
@@ -614,13 +778,27 @@ function refresh_diagnostics(bufnr)
     end
   end
   local all = {}
-  for ft, shadow in pairs(st.shadow) do
+  local function collect(shadow, ranges)
     if vim.api.nvim_buf_is_valid(shadow) then
       for _, diag in ipairs(vim.diagnostic.get(shadow)) do
-        if diagnostic_in_ranges(diag, ranges_by_ft[ft] or {}) then
+        if diagnostic_in_ranges(diag, ranges or {}) then
           all[#all + 1] = diag
         end
       end
+    end
+  end
+  for ft, shadow_or_entries in pairs(st.shadow) do
+    if PER_BLOCK_LANGS[ft] then
+      -- Each per-block shadow's only non-blank lines are that one
+      -- block's own range anyway, so collecting against every cpp/c
+      -- block's ranges (ranges_by_ft[ft]) vs. just this one entry's own
+      -- block produces the same result — reusing the same collect()
+      -- keeps this in step with the shared-shadow branch below.
+      for _, entry in pairs(shadow_or_entries) do
+        collect(entry.bufnr, ranges_by_ft[ft])
+      end
+    else
+      collect(shadow_or_entries, ranges_by_ft[ft])
     end
   end
   vim.diagnostic.set(st.diag_ns, bufnr, all)
@@ -681,7 +859,7 @@ function M.teardown_buffer(bufnr)
   if not st then
     return
   end
-  for _, shadow in pairs(st.shadow) do
+  local function delete_shadow(shadow)
     shadow_owner[shadow] = nil
     if vim.api.nvim_buf_is_valid(shadow) then
       -- A shadow buffer's own filetype (mep.treesitter's own generic
@@ -695,11 +873,27 @@ function M.teardown_buffer(bufnr)
       pcall(vim.api.nvim_buf_delete, shadow, { force = true })
     end
   end
+  for ft, shadow_or_entries in pairs(st.shadow) do
+    if PER_BLOCK_LANGS[ft] then
+      for _, entry in pairs(shadow_or_entries) do
+        delete_shadow(entry.bufnr)
+      end
+    else
+      delete_shadow(shadow_or_entries)
+    end
+  end
   pcall(vim.diagnostic.reset, st.diag_ns, bufnr)
   -- Removes any MANIFESTS scaffold file(s) get_or_create_shadow wrote —
-  -- the only thing this module ever puts on real disk.
+  -- the only thing this module ever puts on real disk *inside the
+  -- project directory*.
   if st.scaffold_root then
     pcall(vim.fn.delete, st.scaffold_root, 'rf')
+  end
+  -- Removes PER_BLOCK_LANGS' own cache-dir scaffolding (shadow files,
+  -- compile_commands.json) — harmless to attempt even if nothing was ever
+  -- written there (no c/cpp block was ever visited this session).
+  if st.cache_root then
+    pcall(vim.fn.delete, st.cache_root, 'rf')
   end
   state[bufnr] = nil
 end
@@ -742,6 +936,7 @@ function M.setup_buffer(bufnr, opts)
       shadow_paths = {},
       diag_ns = vim.api.nvim_create_namespace('mep_org_polyglot_diag_' .. bufnr),
       scaffold_root = scaffold_root(bufnr),
+      cache_root = cache_scaffold_root(bufnr),
     }
   end
 

@@ -53,6 +53,49 @@ local function cmd_available(cfg)
   return exe ~= nil and vim.fn.executable(exe) == 1
 end
 
+--- Compiler driver names clangd may need to query for its system include
+--- paths (gcc/g++/clang family) — checked via `vim.fn.exepath` so the
+--- resulting `--query-driver` glob only ever trusts binaries this
+--- specific machine's own `PATH` already resolves, not an arbitrary
+--- wildcard. Without this, clangd falls back to guessed flags with no
+--- system include paths at all whenever the real compiler's own search
+--- paths aren't wherever clangd's built-in defaults expect (confirmed on
+--- NixOS, where headers live under a per-package `/nix/store/<hash>-gcc-
+--- .../` path rather than `/usr/include` — but the fix is the same on any
+--- system: ask the real compiler where its headers are).
+local QUERY_DRIVER_EXES = { 'gcc', 'g++', 'cc', 'c++', 'clang', 'clang++' }
+
+--- `--query-driver=<dir1>/**,<dir2>/**,...` for every `QUERY_DRIVER_EXES`
+--- entry actually found on `PATH` (deduped by directory — most systems
+--- resolve several of these to the same `bin/` directory), or nil if none
+--- were found.
+local function query_driver_flag()
+  local dirs, seen = {}, {}
+  for _, exe in ipairs(QUERY_DRIVER_EXES) do
+    local path = vim.fn.exepath(exe)
+    if path ~= '' then
+      local dir = vim.fn.fnamemodify(path, ':h')
+      if not seen[dir] then
+        seen[dir] = true
+        dirs[#dirs + 1] = dir .. '/**'
+      end
+    end
+  end
+  return #dirs > 0 and ('--query-driver=' .. table.concat(dirs, ',')) or nil
+end
+
+--- Whether `cmd` (a `cfg.cmd` table) already has its own `--query-driver=`
+--- argument — from `options.servers.clangd` or a user's own override —
+--- so `M.setup` never appends a second, conflicting one.
+local function has_query_driver(cmd)
+  for _, arg in ipairs(cmd) do
+    if type(arg) == 'string' and arg:match('^%-%-query%-driver=') then
+      return true
+    end
+  end
+  return false
+end
+
 --- Configure mep.lsp (see mep.lsp.config.defaults for `enable`/
 --- `servers`/`diagnostics`/`completion`/`keymaps`): registers every
 --- server config, activates whichever `enable` selects *and* is found
@@ -77,6 +120,21 @@ function M.setup(opts)
 
   local to_enable = {}
   for name, cfg in pairs(all_configs(options)) do
+    -- Only for the stock clangd binary (a user who fully replaced cfg.cmd
+    -- with something else is left alone) and only once (never duplicates
+    -- a --query-driver the user already set themselves). Rebinds the
+    -- loop-local `cfg` to a fresh, shallow-copied table rather than
+    -- mutating fields on the original: `cfg` for a user-supplied
+    -- `options.servers.clangd` entry is that caller's own table
+    -- (`all_configs` only deep-copies the curated registry, not
+    -- overrides), so writing into it in place would leak back into
+    -- whatever config table they hold onto elsewhere.
+    if name == 'clangd' and type(cfg.cmd) == 'table' and cfg.cmd[1] == 'clangd' and not has_query_driver(cfg.cmd) then
+      local flag = query_driver_flag()
+      if flag then
+        cfg = vim.tbl_extend('force', cfg, { cmd = vim.list_extend(vim.deepcopy(cfg.cmd), { flag }) })
+      end
+    end
     vim.lsp.config(name, cfg)
     if should_enable(name, options.enable) and cmd_available(cfg) then
       to_enable[#to_enable + 1] = name

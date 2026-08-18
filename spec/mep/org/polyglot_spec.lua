@@ -18,11 +18,27 @@ local function make_buf(lines)
   return buf
 end
 
+-- Same scratch-not-real-location concern as `scratch_dir` above, but for
+-- PER_BLOCK_LANGS (c/cpp): those get their own scaffolding under
+-- `vim.fn.stdpath('cache')` rather than next to the org file, so without
+-- this every test touching a c/cpp block would otherwise leak a real
+-- `mep-polyglot/` directory into this machine's actual Neovim cache dir
+-- (confirmed the hard way while adding the tests below).
+local cache_dir = vim.fn.tempname()
+
 describe('mep.org.polyglot', function()
   local created_bufs
+  local orig_stdpath
 
   before_each(function()
     created_bufs = {}
+    orig_stdpath = vim.fn.stdpath
+    vim.fn.stdpath = function(what)
+      if what == 'cache' then
+        return cache_dir
+      end
+      return orig_stdpath(what)
+    end
   end)
 
   after_each(function()
@@ -32,6 +48,7 @@ describe('mep.org.polyglot', function()
         pcall(vim.api.nvim_buf_delete, buf, { force = true })
       end
     end
+    vim.fn.stdpath = orig_stdpath
   end)
 
   local function buf(lines)
@@ -214,6 +231,200 @@ describe('mep.org.polyglot', function()
       polyglot.teardown_buffer(bufnr)
 
       assert.are.equal(0, vim.fn.isdirectory(root))
+    end)
+  end)
+
+  describe('per-block shadow buffers (c/cpp)', function()
+    it('gives two cpp blocks in one buffer two distinct shadow buffers, each with only its own body', function()
+      local bufnr = buf({
+        '#+begin_src cpp',
+        'int a = 1;',
+        '#+end_src',
+        '#+begin_src cpp',
+        'int b = 2;',
+        '#+end_src',
+      })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local ctx1 = polyglot.context_at_cursor(bufnr, 2)
+      local ctx2 = polyglot.context_at_cursor(bufnr, 5)
+
+      assert.is_not_nil(ctx1)
+      assert.is_not_nil(ctx2)
+      assert.are_not.equal(ctx1.shadow_bufnr, ctx2.shadow_bufnr)
+      assert.are_not.equal(vim.api.nvim_buf_get_name(ctx1.shadow_bufnr), vim.api.nvim_buf_get_name(ctx2.shadow_bufnr))
+
+      assert.are.same({ '', 'int a = 1;', '', '', '', '' }, vim.api.nvim_buf_get_lines(ctx1.shadow_bufnr, 0, -1, false))
+      assert.are.same({ '', '', '', '', 'int b = 2;', '' }, vim.api.nvim_buf_get_lines(ctx2.shadow_bufnr, 0, -1, false))
+    end)
+
+    it('supports :main yes on more than one block in the same file (the shared-shadow limitation is lifted for c/cpp)', function()
+      local bufnr = buf({
+        '#+begin_src cpp :main yes',
+        'std::cout << "a";',
+        '#+end_src',
+        '#+begin_src cpp :main yes',
+        'std::cout << "b";',
+        '#+end_src',
+      })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local ctx1 = polyglot.context_at_cursor(bufnr, 2)
+      local ctx2 = polyglot.context_at_cursor(bufnr, 5)
+
+      assert.are.same(
+        { 'int main() {', 'std::cout << "a";', 'return 0; }', '', '', '' },
+        vim.api.nvim_buf_get_lines(ctx1.shadow_bufnr, 0, -1, false)
+      )
+      assert.are.same(
+        { '', '', '', 'int main() {', 'std::cout << "b";', 'return 0; }' },
+        vim.api.nvim_buf_get_lines(ctx2.shadow_bufnr, 0, -1, false)
+      )
+    end)
+
+    it('places c/cpp scaffolding under stdpath("cache"), not next to the org file', function()
+      local bufnr = buf({ '#+begin_src cpp', 'int x = 1;', '#+end_src' })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local ctx = polyglot.context_at_cursor(bufnr, 2)
+      local path = vim.api.nvim_buf_get_name(ctx.shadow_bufnr)
+      assert.is_not_nil(path:find(cache_dir, 1, true))
+      assert.is_nil(path:find(scratch_dir, 1, true))
+    end)
+
+    it('M.sync updates a per-block shadow when its own block body changes', function()
+      local bufnr = buf({ '#+begin_src cpp', 'int a = 1;', '#+end_src' })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local ctx = polyglot.context_at_cursor(bufnr, 2)
+
+      vim.api.nvim_buf_set_lines(bufnr, 1, 2, false, { 'int a = 2;' })
+      polyglot.sync(bufnr)
+
+      assert.are.same({ '', 'int a = 2;', '' }, vim.api.nvim_buf_get_lines(ctx.shadow_bufnr, 0, -1, false))
+    end)
+
+    it('deletes every per-block shadow buffer and the cache scaffold root on teardown', function()
+      local bufnr = buf({
+        '#+begin_src cpp',
+        'int a = 1;',
+        '#+end_src',
+        '#+begin_src cpp',
+        'int b = 2;',
+        '#+end_src',
+      })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local ctx1 = polyglot.context_at_cursor(bufnr, 2)
+      local ctx2 = polyglot.context_at_cursor(bufnr, 5)
+      local root = vim.fn.fnamemodify(vim.fn.fnamemodify(vim.fn.fnamemodify(vim.api.nvim_buf_get_name(ctx1.shadow_bufnr), ':h'), ':h'), ':h')
+      assert.are.equal(1, vim.fn.isdirectory(root))
+
+      polyglot.teardown_buffer(bufnr)
+
+      assert.is_false(vim.api.nvim_buf_is_valid(ctx1.shadow_bufnr))
+      assert.is_false(vim.api.nvim_buf_is_valid(ctx2.shadow_bufnr))
+      assert.are.equal(0, vim.fn.isdirectory(root))
+    end)
+  end)
+
+  describe('on_block_executed', function()
+    local orig_executable, orig_get_clients
+
+    before_each(function()
+      orig_executable = vim.fn.executable
+      orig_get_clients = vim.lsp.get_clients
+      vim.fn.executable = function(name)
+        return name == 'g++' and 1 or 0
+      end
+      vim.lsp.get_clients = function()
+        return {}
+      end
+    end)
+
+    after_each(function()
+      vim.fn.executable = orig_executable
+      vim.lsp.get_clients = orig_get_clients
+    end)
+
+    it('writes a compile_commands.json entry matching the real compile invocation', function()
+      local bufnr = buf({ '#+begin_src cpp', 'int a = 1;', '#+end_src' })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local ctx = polyglot.context_at_cursor(bufnr, 2)
+      local shadow_path = vim.api.nvim_buf_get_name(ctx.shadow_bufnr)
+      local dir = vim.fn.fnamemodify(shadow_path, ':h')
+
+      polyglot.on_block_executed(bufnr, 2)
+
+      local cdb_path = dir .. '/compile_commands.json'
+      assert.are.equal(1, vim.fn.filereadable(cdb_path))
+      local decoded = vim.json.decode(table.concat(vim.fn.readfile(cdb_path), '\n'))
+      assert.are.equal(1, #decoded)
+      assert.are.equal(dir, decoded[1].directory)
+      assert.are.equal(shadow_path, decoded[1].file)
+      assert.are.same({ 'g++', '-c', shadow_path }, decoded[1].arguments)
+    end)
+
+    it('notifies every client attached to the block shadow buffer via workspace/didChangeWatchedFiles', function()
+      local bufnr = buf({ '#+begin_src cpp', 'int a = 1;', '#+end_src' })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local ctx = polyglot.context_at_cursor(bufnr, 2)
+      local shadow_path = vim.api.nvim_buf_get_name(ctx.shadow_bufnr)
+      local dir = vim.fn.fnamemodify(shadow_path, ':h')
+
+      local notified
+      vim.lsp.get_clients = function(opts)
+        assert.are.equal(ctx.shadow_bufnr, opts.bufnr)
+        return {
+          {
+            notify = function(_, method, params)
+              notified = { method = method, params = params }
+            end,
+          },
+        }
+      end
+
+      polyglot.on_block_executed(bufnr, 2)
+
+      assert.is_not_nil(notified)
+      assert.are.equal('workspace/didChangeWatchedFiles', notified.method)
+      assert.are.equal(vim.uri_from_fname(dir .. '/compile_commands.json'), notified.params.changes[1].uri)
+      assert.are.equal(2, notified.params.changes[1].type)
+    end)
+
+    it('is a no-op (nothing written, no error) when the block was never visited (no shadow yet)', function()
+      local bufnr = buf({ '#+begin_src cpp', 'int a = 1;', '#+end_src' })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+
+      assert.has_no.errors(function()
+        polyglot.on_block_executed(bufnr, 2)
+      end)
+    end)
+
+    it('is a no-op for a non-c/cpp language', function()
+      local bufnr = buf({ '#+begin_src python', 'x = 1', '#+end_src' })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      polyglot.context_at_cursor(bufnr, 2)
+
+      assert.has_no.errors(function()
+        polyglot.on_block_executed(bufnr, 2)
+      end)
+    end)
+
+    it('is a no-op when polyglot was never set up for this buffer', function()
+      local bufnr = buf({ '#+begin_src cpp', 'int a = 1;', '#+end_src' })
+      assert.has_no.errors(function()
+        polyglot.on_block_executed(bufnr, 2)
+      end)
+    end)
+
+    it('is a no-op when no compiler resolves on PATH', function()
+      vim.fn.executable = function()
+        return 0
+      end
+      local bufnr = buf({ '#+begin_src cpp', 'int a = 1;', '#+end_src' })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local ctx = polyglot.context_at_cursor(bufnr, 2)
+      local dir = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(ctx.shadow_bufnr), ':h')
+
+      polyglot.on_block_executed(bufnr, 2)
+
+      assert.are.equal(0, vim.fn.filereadable(dir .. '/compile_commands.json'))
     end)
   end)
 

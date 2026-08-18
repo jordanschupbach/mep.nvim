@@ -950,12 +950,14 @@ describe('mep.org.org', function()
   end)
 
   describe('babel', function()
-    local orig_jobstart, orig_executable
+    local polyglot = require('mep.org.polyglot')
+    local orig_jobstart, orig_executable, orig_on_block_executed
     local captured_cmd, captured_opts
 
     before_each(function()
       orig_jobstart = vim.fn.jobstart
       orig_executable = vim.fn.executable
+      orig_on_block_executed = polyglot.on_block_executed
       vim.fn.executable = function(name)
         return name == 'lua' and 1 or 0
       end
@@ -968,6 +970,7 @@ describe('mep.org.org', function()
     after_each(function()
       vim.fn.jobstart = orig_jobstart
       vim.fn.executable = orig_executable
+      polyglot.on_block_executed = orig_on_block_executed
     end)
 
     it('<C-c>e executes the block at the cursor and inserts a #+RESULTS: block', function()
@@ -1013,6 +1016,56 @@ describe('mep.org.org', function()
 
       assert.are.same({ 'print("tangled")' }, vim.fn.readfile(target))
       vim.fn.delete(tmpdir, 'rf')
+    end)
+
+    it('<C-c>e wires babel.execute\'s on_done into polyglot.on_block_executed', function()
+      stub_install()
+      org.setup({ fold = false })
+
+      local called
+      polyglot.on_block_executed = function(bufnr, lnum)
+        called = { bufnr = bufnr, lnum = lnum }
+      end
+
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_set_current_buf(buf)
+      vim.bo[buf].filetype = 'org'
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '#+begin_src lua', 'print(1)', '#+end_src' })
+      vim.api.nvim_win_set_cursor(0, { 2, 0 })
+
+      vim.cmd('normal \3e') -- <C-c>e
+      assert.is_nil(called) -- not yet — only once the (async) job actually finishes
+
+      captured_opts.on_stdout(42, { '1', '' })
+      captured_opts.on_exit(42, 0)
+
+      assert.is_not_nil(called)
+      assert.are.equal(buf, called.bufnr)
+      assert.are.equal(2, called.lnum)
+    end)
+
+    it('<C-c><C-c> also wires babel.execute\'s on_done into polyglot.on_block_executed', function()
+      stub_install()
+      org.setup({ fold = false })
+
+      local called
+      polyglot.on_block_executed = function(bufnr, lnum)
+        called = { bufnr = bufnr, lnum = lnum }
+      end
+
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_set_current_buf(buf)
+      vim.bo[buf].filetype = 'org'
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '#+begin_src lua', 'print(1)', '#+end_src' })
+      vim.api.nvim_win_set_cursor(0, { 2, 0 })
+
+      vim.cmd('normal \3\3') -- <C-c><C-c>
+      captured_opts.on_stdout(42, { '1', '' })
+      captured_opts.on_exit(42, 0)
+
+      assert.is_not_nil(called)
+      assert.are.equal(buf, called.bufnr)
+      assert.are.equal(2, called.lnum)
     end)
 
     it('<C-c><C-c> executes the src block at the cursor, like <C-c>e', function()
