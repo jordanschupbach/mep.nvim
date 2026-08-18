@@ -1141,8 +1141,8 @@ M.first_error_line = first_error_line
 --- `lang`'s language def and resolved executable, or `nil, err` (a ready-
 --- to-notify message string) if the language is unsupported or has no
 --- interpreter on PATH. Shared by `M.execute` (interactive) and `M.
---- run_sync` (blocking, no live buffer) — both need identical failure
---- messages for the same two failure modes.
+--- run_async` (no live buffer) — both need identical failure messages
+--- for the same two failure modes.
 local function resolve_language(lang)
   local lang_def = M.languages[lang:lower()]
   if not lang_def then
@@ -1163,7 +1163,7 @@ end
 --- prelude assignments, the body itself (via `build_script`, honoring
 --- `:results value`), then `wrap_main` if `lang_def` has one and `args`
 --- opts into it (see `M.should_wrap_main`). Shared by `M.execute` and `M.
---- run_sync` — script construction is identical either way, only how the
+--- run_async` — script construction is identical either way, only how the
 --- result gets run/reported differs.
 local function prepare_script(lang_key, lang_def, args, body)
   local results_mode = (args.results and args.results:match('value')) and 'value' or 'output'
@@ -1194,7 +1194,8 @@ end
 --- compiled language: compile, then execute) settles. `args` supplies
 --- `:classname` (Java only). No buffer/notification side effects here —
 --- both callers (`M.execute`, writing results into a live buffer; `M.
---- run_sync`, returning them to a blocking caller) own that themselves.
+--- run_async`, just forwarding them to its own caller's callback) own
+--- that themselves.
 local function spawn_script(lang_def, exe, script_lines, args, on_finish)
   local source_path = vim.fn.tempname() .. lang_def.extension
   vim.fn.writefile(script_lines, source_path)
@@ -1316,35 +1317,24 @@ function M.execute(bufnr, lnum, on_done)
 end
 
 --- Execute `body` (a `#+begin_src <lang> ...` block's body, not tied to any
---- particular buffer) synchronously — blocks the editor via `vim.wait`
---- until the whole run (for a compiled language: compile, then execute)
---- settles. `args` is an already-parsed header-args table (`M.
+--- particular buffer) asynchronously, calling `on_done(code, stdout,
+--- stderr, failure_verb)` once the whole run (for a compiled language:
+--- compile, then execute) settles — never blocks the editor, the same
+--- "kick off a job, come back on_exit" shape `core.job.spawn`/`M.execute`
+--- already have. `args` is an already-parsed header-args table (`M.
 --- parse_header_args`'s own shape). Used by `mep.org.export` to embed
 --- fresh babel output in an exported document, where there's no live
 --- buffer/cursor for `M.execute`'s own async-callback-into-the-buffer
---- contract to make sense. Returns `code, stdout, stderr` on completion,
---- or `nil, err` (a ready-to-notify message string) if the language is
---- unsupported/has no interpreter on PATH, or the run didn't settle within
---- 30s (a hung/runaway block shouldn't be able to freeze an export
---- indefinitely).
-function M.run_sync(lang, args, body)
+--- contract to make sense. Calls `on_done(nil, err)` synchronously instead
+--- if the language is unsupported/has no interpreter on PATH.
+function M.run_async(lang, args, body, on_done)
   local lang_def, exe = resolve_language(lang)
   if not lang_def then
-    return nil, exe -- `exe` holds the error message on failure
+    on_done(nil, exe) -- `exe` holds the error message on failure
+    return
   end
   local script_lines = prepare_script(lang:lower(), lang_def, args, body)
-
-  local done, code, stdout, stderr
-  spawn_script(lang_def, exe, script_lines, args, function(c, out, err)
-    done, code, stdout, stderr = true, c, out, err
-  end)
-  vim.wait(30000, function()
-    return done == true
-  end, 10)
-  if not done then
-    return nil, 'mep.org: babel execution timed out (' .. lang .. ')'
-  end
-  return code, stdout, stderr
+  spawn_script(lang_def, exe, script_lines, args, on_done)
 end
 
 --- The absolute path a block should tangle to, from its `:tangle`

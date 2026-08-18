@@ -351,7 +351,7 @@ describe('mep.org.babel', function()
     end)
   end)
 
-  describe('run_sync', function()
+  describe('run_async', function()
     local orig_jobstart, orig_executable
     local captured_cmd
 
@@ -362,12 +362,11 @@ describe('mep.org.babel', function()
       vim.fn.executable = function(name)
         return name == 'lua' and 1 or 0
       end
-      -- Resolves synchronously — `M.run_sync` blocks on `vim.wait` until
-      -- its own callback marks the run done, so (per spec/README.md's
-      -- mocking convention for anything touching vim.fn.jobstart) the
-      -- callbacks fire from inside the mock itself, before it returns,
-      -- rather than being driven by hand afterwards the way `M.execute`'s
-      -- own (genuinely async) tests do.
+      -- Resolves synchronously in most of these tests (calls back before
+      -- returning) purely for assertion convenience — `M.run_async`
+      -- itself never blocks or waits; see the dedicated "does not block"
+      -- test below for proof that a callback deferred past the initial
+      -- call really does stay deferred.
       vim.fn.jobstart = function(cmd, opts)
         captured_cmd = cmd
         opts.on_stdout(1, { '1', '' })
@@ -381,8 +380,11 @@ describe('mep.org.babel', function()
       vim.fn.executable = orig_executable
     end)
 
-    it('runs the block and returns code/stdout/stderr synchronously', function()
-      local code, stdout, stderr = babel.run_sync('lua', { var = {} }, { 'print(1)' })
+    it('runs the block and calls on_done with code/stdout/stderr', function()
+      local code, stdout, stderr
+      babel.run_async('lua', { var = {} }, { 'print(1)' }, function(c, out, err)
+        code, stdout, stderr = c, out, err
+      end)
       assert.are.equal(0, code)
       assert.are.same({ '1' }, stdout)
       assert.are.same({}, stderr)
@@ -391,10 +393,9 @@ describe('mep.org.babel', function()
 
     it('applies :var/:results value the same way M.execute does', function()
       -- Read the script inside the mock itself, before on_exit's own
-      -- cleanup deletes it — unlike M.execute's tests, on_exit fires
-      -- synchronously here (see this describe block's own before_each
-      -- comment), so nothing survives past the `run_sync` call to
-      -- inspect afterwards.
+      -- cleanup deletes it — the mock resolves synchronously here (see
+      -- this describe block's own before_each comment), so nothing
+      -- survives past the `run_async` call to inspect afterwards.
       local written
       vim.fn.jobstart = function(cmd, opts)
         captured_cmd = cmd
@@ -403,24 +404,49 @@ describe('mep.org.babel', function()
         opts.on_exit(1, 0)
         return 1
       end
-      babel.run_sync('lua', { var = { 'x=5' }, results = 'value' }, { 'local y = 2', 'y + 1' })
+      babel.run_async('lua', { var = { 'x=5' }, results = 'value' }, { 'local y = 2', 'y + 1' }, function() end)
       assert.are.same({ 'local x = 5', 'local y = 2', 'print(y + 1)' }, written)
     end)
 
-    it('returns nil, err for an unsupported language without spawning anything', function()
-      local code, err = babel.run_sync('cobol', { var = {} }, { 'x' })
+    it('calls on_done(nil, err) for an unsupported language without spawning anything', function()
+      local code, err
+      babel.run_async('cobol', { var = {} }, { 'x' }, function(c, e)
+        code, err = c, e
+      end)
       assert.is_nil(code)
       assert.matches('unsupported babel language', err)
       assert.is_nil(captured_cmd)
     end)
 
-    it('returns nil, err when no interpreter is found on PATH', function()
+    it('calls on_done(nil, err) when no interpreter is found on PATH', function()
       vim.fn.executable = function()
         return 0
       end
-      local code, err = babel.run_sync('lua', { var = {} }, { 'x' })
+      local code, err
+      babel.run_async('lua', { var = {} }, { 'x' }, function(c, e)
+        code, err = c, e
+      end)
       assert.is_nil(code)
       assert.matches('no lua interpreter found', err)
+    end)
+
+    it('does not block: on_done only fires once the job actually settles', function()
+      local fire
+      vim.fn.jobstart = function(cmd, opts)
+        captured_cmd = cmd
+        fire = function()
+          opts.on_stdout(1, { '1', '' })
+          opts.on_exit(1, 0)
+        end
+        return 1
+      end
+      local done_code
+      babel.run_async('lua', { var = {} }, { 'print(1)' }, function(c)
+        done_code = c
+      end)
+      assert.is_nil(done_code) -- on_done hasn't fired yet — run_async returned without waiting
+      fire()
+      assert.are.equal(0, done_code)
     end)
   end)
 

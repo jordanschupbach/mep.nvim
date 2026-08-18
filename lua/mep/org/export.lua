@@ -160,39 +160,69 @@ end
 --- `never-export` (evaluate interactively, but not during export).
 local EVAL_SKIP_EXPORT = { no = true, never = true, ['no-export'] = true, ['never-export'] = true }
 
---- Execute one export-time src block synchronously (`mep.org.babel.
---- run_sync`) and return its captured stdout lines, or nil if the
---- language couldn't be resolved or the run failed — either way a
---- `vim.notify` warning is shown and the rest of the export still
---- proceeds, the same "degrade gracefully, don't abort" contract `mep.
---- org.babel.execute`'s own per-block failure paths already have.
---- `:cache yes` reuses `mep.org.babel.results_cache` under the exact key
---- `mep.org.babel.execute`'s own `:cache yes` path would use for the same
---- block position/body/args, so exporting right after a manual `<C-c>e`
---- on the same block hits the cache instead of re-running it.
-local function run_export_babel(bufnr, blk, lang, hargs, header_str)
+--- Execute one export-time src block asynchronously (`mep.org.babel.
+--- run_async`), calling `on_done(results)` with its captured stdout lines
+--- once it settles, or `on_done(nil)` if the language couldn't be
+--- resolved — either way a `vim.notify` warning is shown and the rest of
+--- the export still proceeds, the same "degrade gracefully, don't abort"
+--- contract `mep.org.babel.execute`'s own per-block failure paths already
+--- have. Never blocks the editor: a slow or compiled block just delays
+--- its own `on_done`, not the rest of the export (see `run_pending_async`,
+--- which fires every pending block's job concurrently). `:cache yes`
+--- reuses `mep.org.babel.results_cache` under the exact key `mep.org.
+--- babel.execute`'s own `:cache yes` path would use for the same block
+--- position/body/args, so exporting right after a manual `<C-c>e` on the
+--- same block hits the cache instead of re-running it.
+local function run_export_babel_async(bufnr, blk, lang, hargs, header_str, on_done)
   local cache_key
   if hargs.cache == 'yes' then
     cache_key = babel_mod.cache_key(bufnr or -1, { start_lnum = blk.start_lnum, body = blk.body, args = header_str })
     local cached = babel_mod.results_cache[cache_key]
     if cached then
-      return cached
+      on_done(cached)
+      return
     end
   end
-  local code, stdout, stderr = babel_mod.run_sync(lang, hargs, blk.body)
-  if code == nil then
-    vim.notify(stdout, vim.log.levels.WARN) -- `stdout` holds the error message on failure
-    return nil
+  babel_mod.run_async(lang, hargs, blk.body, function(code, stdout, stderr, failure_verb)
+    if code == nil then
+      vim.notify(stdout, vim.log.levels.WARN) -- `stdout` holds the error message on failure
+      on_done(nil)
+      return
+    end
+    if code ~= 0 then
+      vim.notify(
+        'mep.org: export babel ' .. (failure_verb or 'execution') .. ' failed (' .. lang .. '): ' .. (babel_mod.first_error_line(stderr) or ('exit code ' .. code)),
+        vim.log.levels.WARN
+      )
+    elseif hargs.cache == 'yes' then
+      babel_mod.results_cache[cache_key] = stdout
+    end
+    on_done(stdout)
+  end)
+end
+
+--- Run every job in `pending` (see `build_blocks`'s own comment)
+--- concurrently, calling `on_done()` once all of them have settled —
+--- immediately, in the same call, if `pending` is empty. Each job mutates
+--- its own block's `results` field in place (via closure) before calling
+--- its own `done()`; this just tracks how many are still outstanding.
+--- Never blocks the editor — unlike a `vim.wait`-based "wait for them
+--- all" would, jobs simply run at their own pace on Neovim's own event
+--- loop, exactly like any other `core.job.spawn` caller.
+local function run_pending_async(pending, on_done)
+  if #pending == 0 then
+    on_done()
+    return
   end
-  if code ~= 0 then
-    vim.notify(
-      'mep.org: export babel execution failed (' .. lang .. '): ' .. (babel_mod.first_error_line(stderr) or ('exit code ' .. code)),
-      vim.log.levels.WARN
-    )
-  elseif hargs.cache == 'yes' then
-    babel_mod.results_cache[cache_key] = stdout
+  local remaining = #pending
+  for _, job in ipairs(pending) do
+    job.run(function()
+      remaining = remaining - 1
+      if remaining == 0 then
+        on_done()
+      end
+    end)
   end
-  return stdout
 end
 
 --- Build the flat, ordered `blocks` list for `lines` given already-known
@@ -202,23 +232,30 @@ end
 --- and neither does this). A headline tagged `:noexport:` (real
 --- org-mode's default `org-export-exclude-tags`) is skipped along with
 --- its entire subtree. Also returns `footnotes`, an ordered list of
---- `{ name, text }` collected from standalone `[fn:name] text` lines.
+--- `{ name, text }` collected from standalone `[fn:name] text` lines,
+--- and `pending`, a list of `{ run = function(done) ... end }` jobs (see
+--- `run_pending_async`) — one per `src` block that needs babel execution.
 ---
---- Every `src` block is executed (via `run_export_babel`, unless `opts.
---- eval == false` or the block's own `:eval no`/`no-export`/`never`/
---- `never-export`) and its output attached as the block's own `results`
---- field, rendered by each backend right after the code. This is a
---- deliberate deviation from real org-babel's own default `:exports`
---- value (`"code"` — code shown, nothing run/shown for output unless a
---- block opts in with `:exports both`/`results`): asked to make "export
---- actually runs the code", the more useful default for this project is
---- the reverse — run and show output by default, with `:exports code`/
---- `none`/`results` as the opt-out/narrowing knobs real org-mode also
---- uses for those exact values.
+--- A `src` block gets a `results = nil` placeholder plus a `pending`
+--- entry (unless `opts.eval == false` or the block's own `:eval no`/
+--- `no-export`/`never`/`never-export`) that, once run, fills `results`
+--- in with its captured stdout — rendered by each backend right after
+--- the code. This is a deliberate deviation from real org-babel's own
+--- default `:exports` value (`"code"` — code shown, nothing run/shown
+--- for output unless a block opts in with `:exports both`/`results`):
+--- asked to make "export actually runs the code", the more useful
+--- default for this project is the reverse — run and show output by
+--- default, with `:exports code`/`none`/`results` as the opt-out/
+--- narrowing knobs real org-mode also uses for those exact values.
+--- Building this list is itself synchronous/cheap (it just records what
+--- needs running); actually running it is `parse_lines_async`'s/
+--- `parse_async`'s job, so a slow or compiled block never blocks parsing
+--- itself.
 local function build_blocks(lines, todo_keywords, macros, opts)
   local function expand(text)
     return macro_mod.expand(text, macros)
   end
+  local pending = {}
 
   local blocks = {}
   local footnotes = {}
@@ -312,11 +349,18 @@ local function build_blocks(lines, todo_keywords, macros, opts)
         local hargs = babel_mod.parse_header_args(header_str)
         local exports = hargs.exports or 'both'
         if exports ~= 'none' then
-          local results = nil
+          local block_entry = { type = 'src', lang = lang, body = blk.body, results = nil, show_code = exports ~= 'results' }
+          blocks[#blocks + 1] = block_entry
           if opts.eval ~= false and exports ~= 'code' and not EVAL_SKIP_EXPORT[hargs.eval] then
-            results = run_export_babel(opts.bufnr, blk, lang, hargs, header_str)
+            pending[#pending + 1] = {
+              run = function(done)
+                run_export_babel_async(opts.bufnr, blk, lang, hargs, header_str, function(results)
+                  block_entry.results = results
+                  done()
+                end)
+              end,
+            }
           end
-          blocks[#blocks + 1] = { type = 'src', lang = lang, body = blk.body, results = results, show_code = exports ~= 'results' }
         end
       elseif blk.kind == 'quote' or blk.kind == 'verse' or blk.kind == 'center' then
         local body = {}
@@ -373,7 +417,7 @@ local function build_blocks(lines, todo_keywords, macros, opts)
     ::continue::
   end
 
-  return blocks, footnotes
+  return blocks, footnotes, pending
 end
 
 --- Assign `number` ("1", "1.2", ...) to every `headline` block in
@@ -400,38 +444,75 @@ local function number_headlines(blocks)
 end
 
 --- Parse `lines` (already include-resolved, if desired) into a document:
---- `{ title, author, date, options, blocks, footnotes }`. `opts.
+--- `{ title, author, date, options, blocks, footnotes }`, plus a second
+--- return value `pending` — a list of not-yet-run babel jobs (see
+--- `build_blocks`'s own comment); most callers only want the first
+--- return value and can safely ignore the second (Lua discards extra
+--- returns), but every `src` block's own `results` field stays nil until
+--- `pending`'s jobs actually run (via `run_pending_async`, or just use
+--- `parse_lines_async` below to get both steps done for you). `opts.
 --- todo_keywords` matches the rest of mep.org (default `{}`). `opts.eval
---- == false` disables export-time babel execution entirely (see
---- `build_blocks`'s own comment); `opts.bufnr`, if given, namespaces
---- `:cache yes` src blocks the same way `mep.org.babel.execute`'s own
---- cache keys are namespaced by buffer.
+--- == false` disables export-time babel execution entirely (`pending`
+--- comes back empty); `opts.bufnr`, if given, namespaces `:cache yes` src
+--- blocks the same way `mep.org.babel.execute`'s own cache keys are
+--- namespaced by buffer.
 function M.parse_lines(lines, opts)
   opts = opts or {}
   local doc = scan_metadata(lines)
-  local blocks, footnotes = build_blocks(lines, opts.todo_keywords or {}, doc.macros, opts)
+  local blocks, footnotes, pending = build_blocks(lines, opts.todo_keywords or {}, doc.macros, opts)
   if truthy_option(doc, 'num', true) then
     number_headlines(blocks)
   end
   doc.blocks = blocks
   doc.footnotes = footnotes
   doc.macros = nil
-  return doc
+  return doc, pending
 end
 
---- Parse `bufnr` into a document (see `parse_lines`). `#+INCLUDE:`
---- directives are resolved first (relative to the buffer's own file
---- directory) unless `opts.resolve_includes == false`.
-function M.parse(bufnr, opts)
+--- `parse_lines`, but every pending babel job is actually run (see
+--- `run_pending_async`) before `on_done(doc)` is called with the
+--- now-fully-populated document — asynchronously, never blocking the
+--- editor even if a block is slow or needs compiling. `on_done` is
+--- called in the very same tick if there was nothing to run (no `src`
+--- blocks, or `opts.eval == false`).
+function M.parse_lines_async(lines, opts, on_done)
+  local doc, pending = M.parse_lines(lines, opts)
+  run_pending_async(pending, function()
+    on_done(doc)
+  end)
+end
+
+--- `lines`/`opts` for `bufnr` (shared by `M.parse`/`M.parse_async`):
+--- `#+INCLUDE:` directives are resolved first (relative to the buffer's
+--- own file directory) unless `opts.resolve_includes == false`; `opts.
+--- bufnr` is filled in from `bufnr` if not already set.
+local function resolve_lines_for_parse(bufnr, opts)
   opts = opts or {}
   opts.bufnr = opts.bufnr or bufnr
-  local lines
   if opts.resolve_includes == false then
-    lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  else
-    lines = include_mod.resolve(bufnr)
+    return vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), opts
   end
+  return include_mod.resolve(bufnr), opts
+end
+
+--- Parse `bufnr` into a document (see `parse_lines`) — synchronous, so
+--- (like `parse_lines`) the returned document's `src` blocks have no
+--- `results` yet; use `parse_async` if you need those filled in.
+function M.parse(bufnr, opts)
+  local lines
+  lines, opts = resolve_lines_for_parse(bufnr, opts)
   return M.parse_lines(lines, opts)
+end
+
+--- `parse`, but see `parse_lines_async` — actually runs every pending
+--- babel job before calling `on_done(doc)`, asynchronously. This is what
+--- `mep.org.export`'s own export commands (`export_to_file`/
+--- `export_subtree`/`dispatch_interactive`) use so a slow/compiled block
+--- never locks up the editor during export.
+function M.parse_async(bufnr, opts, on_done)
+  local lines
+  lines, opts = resolve_lines_for_parse(bufnr, opts)
+  M.parse_lines_async(lines, opts, on_done)
 end
 
 --- Tokenize `text` (already macro-expanded, from a paragraph, list item,
@@ -542,16 +623,25 @@ function M.write(doc, backend_name, path)
 end
 
 --- Parse `bufnr` and export it via `backend_name` to `path` (default:
---- `default_path`). Returns the written path, or nil (with a
---- notification) if no path was given/derivable.
-function M.export_to_file(bufnr, backend_name, path, opts)
+--- `default_path`), asynchronously (see `parse_async` — babel execution
+--- never blocks the editor). Calls `on_done(path)` once the file is
+--- written, or `on_done(nil)` (with a notification) if no path was
+--- given/derivable; `on_done` is optional.
+function M.export_to_file(bufnr, backend_name, path, opts, on_done)
   path = path or M.default_path(bufnr, backend_name)
   if not path then
     vim.notify('mep.org: no export path (buffer has no file name)', vim.log.levels.WARN)
-    return nil
+    if on_done then
+      on_done(nil)
+    end
+    return
   end
-  local doc = M.parse(bufnr, opts)
-  return M.write(doc, backend_name, path)
+  M.parse_async(bufnr, opts, function(doc)
+    local written = M.write(doc, backend_name, path)
+    if on_done then
+      on_done(written)
+    end
+  end)
 end
 
 --- Export just the subtree rooted at the headline containing `lnum` —
@@ -561,22 +651,30 @@ end
 --- descendants' levels are renormalized so the first child level becomes
 --- level 1, matching real org-mode's own subtree-export behavior of
 --- treating the subtree as a standalone document rather than preserving
---- its original absolute depth. Returns the written path, or nil (with
---- a notification) if `lnum` isn't inside a headline or no path was
---- given/derivable.
-function M.export_subtree(bufnr, lnum, backend_name, path, opts)
+--- its original absolute depth. Asynchronous, like `export_to_file` (see
+--- `parse_lines_async` — babel execution never blocks the editor). Calls
+--- `on_done(path)` once the file is written, or `on_done(nil)` (with a
+--- notification) if `lnum` isn't inside a headline or no path was
+--- given/derivable; `on_done` is optional.
+function M.export_subtree(bufnr, lnum, backend_name, path, opts, on_done)
   opts = opts or {}
   opts.bufnr = opts.bufnr or bufnr
   local todo_keywords = opts.todo_keywords or {}
   local at = outline_mod.current_headline(bufnr, lnum)
   if not at then
     vim.notify('mep.org: no headline at cursor to export', vim.log.levels.WARN)
-    return nil
+    if on_done then
+      on_done(nil)
+    end
+    return
   end
   path = path or M.default_path(bufnr, backend_name)
   if not path then
     vim.notify('mep.org: no export path (buffer has no file name)', vim.log.levels.WARN)
-    return nil
+    if on_done then
+      on_done(nil)
+    end
+    return
   end
 
   local last = outline_mod.subtree_end(bufnr, at)
@@ -598,8 +696,12 @@ function M.export_subtree(bufnr, lnum, backend_name, path, opts)
   if opts.resolve_includes ~= false then
     normalized = include_mod.resolve_lines(normalized, buffer_dir(bufnr))
   end
-  local doc = M.parse_lines(normalized, opts)
-  return M.write(doc, backend_name, path)
+  M.parse_lines_async(normalized, opts, function(doc)
+    local written = M.write(doc, backend_name, path)
+    if on_done then
+      on_done(written)
+    end
+  end)
 end
 
 --- Export the current buffer (or, with `opts.subtree_lnum` set, just the
@@ -607,21 +709,25 @@ end
 --- for a backend via `vim.ui.select` (real org-export-dispatch's own
 --- "ask a backend first" UX, simplified from its fuller menu of
 --- backend/scope/async combinations), then writes to `default_path` and
---- notifies where.
+--- notifies where. Fully asynchronous end-to-end — including while any
+--- `src` block in the document is compiling/running — so this never
+--- locks up the editor the way a `vim.wait`-based "block until babel
+--- finishes" implementation would.
 function M.dispatch_interactive(bufnr, opts)
   opts = opts or {}
   vim.ui.select(M.backend_names, { prompt = 'Export backend:' }, function(choice)
     if not choice then
       return
     end
-    local path
-    if opts.subtree_lnum then
-      path = M.export_subtree(bufnr, opts.subtree_lnum, choice, nil, opts)
-    else
-      path = M.export_to_file(bufnr, choice, nil, opts)
+    local function on_done(path)
+      if path then
+        vim.notify('mep.org: exported to ' .. path, vim.log.levels.INFO)
+      end
     end
-    if path then
-      vim.notify('mep.org: exported to ' .. path, vim.log.levels.INFO)
+    if opts.subtree_lnum then
+      M.export_subtree(bufnr, opts.subtree_lnum, choice, nil, opts, on_done)
+    else
+      M.export_to_file(bufnr, choice, nil, opts, on_done)
     end
   end)
 end

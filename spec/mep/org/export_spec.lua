@@ -168,9 +168,23 @@ describe('mep.org.export', function()
     end)
   end)
 
-  describe('parse_lines: babel execution during export', function()
+  describe('parse_lines_async: babel execution during export', function()
     local orig_jobstart, orig_executable, orig_notify
     local jobstart_calls, notifications
+
+    -- `parse_lines_async(lines, opts, on_done)` mutates the doc handed to
+    -- `on_done` asynchronously; with the mocked `vim.fn.jobstart` below
+    -- resolving synchronously (calling on_exit before returning), `done`
+    -- is already populated by the time the call returns — no real
+    -- subprocess or real waiting involved, matching spec/README.md's
+    -- mocking convention for anything that touches vim.fn.jobstart.
+    local function parse(lines, opts)
+      local done
+      export.parse_lines_async(lines, opts, function(doc)
+        done = doc
+      end)
+      return done
+    end
 
     before_each(function()
       orig_jobstart = vim.fn.jobstart
@@ -184,11 +198,6 @@ describe('mep.org.export', function()
       vim.fn.executable = function(name)
         return name == 'lua' and 1 or 0
       end
-      -- Resolves synchronously (calls on_stdout/on_exit before returning),
-      -- so mep.org.babel.run_sync's own vim.wait loop sees the result
-      -- already in hand on its very first check — no real subprocess or
-      -- real waiting involved, matching spec/README.md's mocking
-      -- convention for anything that touches vim.fn.jobstart.
       vim.fn.jobstart = function(cmd, jobstart_opts)
         table.insert(jobstart_calls, cmd)
         jobstart_opts.on_stdout(1, { '42', '' })
@@ -204,51 +213,51 @@ describe('mep.org.export', function()
     end)
 
     it('runs a src block and attaches its output as results, with no :exports at all', function()
-      local doc = export.parse_lines({ '#+begin_src lua', 'print(42)', '#+end_src' }, { eval = true })
+      local doc = parse({ '#+begin_src lua', 'print(42)', '#+end_src' }, { eval = true })
       assert.are.equal(1, #jobstart_calls)
       assert.is_true(doc.blocks[1].show_code)
       assert.are.same({ '42' }, doc.blocks[1].results)
     end)
 
     it(':exports code shows only the code, without executing', function()
-      local doc = export.parse_lines({ '#+begin_src lua :exports code', 'print(42)', '#+end_src' }, { eval = true })
+      local doc = parse({ '#+begin_src lua :exports code', 'print(42)', '#+end_src' }, { eval = true })
       assert.are.equal(0, #jobstart_calls)
       assert.is_true(doc.blocks[1].show_code)
       assert.is_nil(doc.blocks[1].results)
     end)
 
     it(':exports none drops the block from the export entirely', function()
-      local doc = export.parse_lines({ '#+begin_src lua :exports none', 'print(42)', '#+end_src' }, { eval = true })
+      local doc = parse({ '#+begin_src lua :exports none', 'print(42)', '#+end_src' }, { eval = true })
       assert.are.equal(0, #jobstart_calls)
       assert.are.equal(0, #doc.blocks)
     end)
 
     it(':exports results shows only the output, hiding the code', function()
-      local doc = export.parse_lines({ '#+begin_src lua :exports results', 'print(42)', '#+end_src' }, { eval = true })
+      local doc = parse({ '#+begin_src lua :exports results', 'print(42)', '#+end_src' }, { eval = true })
       assert.is_false(doc.blocks[1].show_code)
       assert.are.same({ '42' }, doc.blocks[1].results)
     end)
 
     it(':eval never skips execution', function()
-      local doc = export.parse_lines({ '#+begin_src lua :eval never', 'print(42)', '#+end_src' }, { eval = true })
+      local doc = parse({ '#+begin_src lua :eval never', 'print(42)', '#+end_src' }, { eval = true })
       assert.are.equal(0, #jobstart_calls)
       assert.is_nil(doc.blocks[1].results)
     end)
 
     it(':eval no-export skips execution during export', function()
-      local doc = export.parse_lines({ '#+begin_src lua :eval no-export', 'print(42)', '#+end_src' }, { eval = true })
+      local doc = parse({ '#+begin_src lua :eval no-export', 'print(42)', '#+end_src' }, { eval = true })
       assert.are.equal(0, #jobstart_calls)
       assert.is_nil(doc.blocks[1].results)
     end)
 
     it('opts.eval == false disables babel execution for the whole parse', function()
-      local doc = export.parse_lines({ '#+begin_src lua', 'print(42)', '#+end_src' }, { eval = false })
+      local doc = parse({ '#+begin_src lua', 'print(42)', '#+end_src' }, { eval = false })
       assert.are.equal(0, #jobstart_calls)
       assert.is_nil(doc.blocks[1].results)
     end)
 
     it('warns and leaves results nil for an unsupported language', function()
-      local doc = export.parse_lines({ '#+begin_src cobol', 'x', '#+end_src' }, { eval = true })
+      local doc = parse({ '#+begin_src cobol', 'x', '#+end_src' }, { eval = true })
       assert.is_nil(doc.blocks[1].results)
       assert.are.equal(1, #notifications)
       assert.matches('unsupported babel language', notifications[1].msg)
@@ -261,7 +270,7 @@ describe('mep.org.export', function()
         jobstart_opts.on_exit(1, 1)
         return 1
       end
-      local doc = export.parse_lines({ '#+begin_src lua', 'error("boom")', '#+end_src' }, { eval = true })
+      local doc = parse({ '#+begin_src lua', 'error("boom")', '#+end_src' }, { eval = true })
       assert.are.same({}, doc.blocks[1].results)
       assert.are.equal(1, #notifications)
       assert.matches('export babel execution failed', notifications[1].msg)
@@ -272,11 +281,58 @@ describe('mep.org.export', function()
       local babel = require('mep.org.babel')
       babel.results_cache = {}
       local lines = { '#+begin_src lua :cache yes', 'print(42)', '#+end_src' }
-      export.parse_lines(lines, { eval = true })
+      parse(lines, { eval = true })
       assert.are.equal(1, #jobstart_calls)
-      export.parse_lines(lines, { eval = true })
+      parse(lines, { eval = true })
       assert.are.equal(1, #jobstart_calls)
       babel.results_cache = {}
+    end)
+
+    it('does not block: on_done only fires once every pending block has settled', function()
+      local fire
+      vim.fn.jobstart = function(cmd, jobstart_opts)
+        table.insert(jobstart_calls, cmd)
+        fire = function()
+          jobstart_opts.on_stdout(1, { '42', '' })
+          jobstart_opts.on_exit(1, 0)
+        end
+        return 1
+      end
+      local done_doc
+      export.parse_lines_async({ '#+begin_src lua', 'print(42)', '#+end_src' }, { eval = true }, function(doc)
+        done_doc = doc
+      end)
+      assert.is_nil(done_doc) -- hasn't run yet — proves this isn't a blocking wait
+      fire()
+      assert.is_not_nil(done_doc)
+      assert.are.same({ '42' }, done_doc.blocks[1].results)
+    end)
+
+    it('runs multiple pending blocks concurrently, not one after another', function()
+      local fires = {}
+      vim.fn.jobstart = function(cmd, jobstart_opts)
+        table.insert(jobstart_calls, cmd)
+        table.insert(fires, function()
+          jobstart_opts.on_stdout(1, { 'ok', '' })
+          jobstart_opts.on_exit(1, 0)
+        end)
+        return #fires
+      end
+      local done_doc
+      export.parse_lines_async({
+        '#+begin_src lua', 'print(1)', '#+end_src',
+        '#+begin_src lua', 'print(2)', '#+end_src',
+      }, { eval = true }, function(doc)
+        done_doc = doc
+      end)
+      assert.are.equal(2, #jobstart_calls) -- both jobs kicked off up front, not sequentially
+      assert.is_nil(done_doc)
+      fires[1]()
+      assert.is_nil(done_doc) -- still waiting on the second
+      fires[2]()
+      assert.is_not_nil(done_doc)
+      assert.are.same({ 'ok' }, done_doc.blocks[1].results)
+      assert.are.same({ 'ok' }, done_doc.blocks[2].results)
     end)
   end)
 
@@ -446,7 +502,7 @@ describe('mep.org.export', function()
   end)
 
   describe('export_to_file', function()
-    it('writes the rendered document to disk', function()
+    it('writes the rendered document to disk (asynchronously — the callback carries the path)', function()
       local dir = vim.fn.tempname()
       vim.fn.mkdir(dir, 'p')
       local bufpath = dir .. '/doc.org'
@@ -454,7 +510,14 @@ describe('mep.org.export', function()
       local buf = vim.fn.bufadd(bufpath)
       vim.fn.bufload(buf)
 
-      local path = export.export_to_file(buf, 'markdown', nil, { todo_keywords = TODO })
+      -- No src blocks here, so there's nothing to run asynchronously and
+      -- on_done fires in the same call — see the dedicated "does not
+      -- block" test in the babel-execution describe block above for
+      -- proof that a genuinely pending job really does defer on_done.
+      local path
+      export.export_to_file(buf, 'markdown', nil, { todo_keywords = TODO }, function(p)
+        path = p
+      end)
       assert.are.equal(dir .. '/doc.md', path)
       local written = vim.fn.readfile(path)
       assert.is_true(vim.tbl_contains(written, '# Title'))
@@ -472,7 +535,10 @@ describe('mep.org.export', function()
       local buf = vim.fn.bufadd(bufpath)
       vim.fn.bufload(buf)
 
-      local path = export.export_subtree(buf, 3, 'markdown', nil, { todo_keywords = TODO })
+      local path
+      export.export_subtree(buf, 3, 'markdown', nil, { todo_keywords = TODO }, function(p)
+        path = p
+      end)
       local written = vim.fn.readfile(path)
       assert.are.equal('# Chapter One', written[1])
       assert.is_true(vim.tbl_contains(written, '# Section'))
@@ -489,17 +555,24 @@ describe('mep.org.export', function()
       local buf = vim.fn.bufadd(bufpath)
       vim.fn.bufload(buf)
 
-      local path = export.export_subtree(buf, 1, 'markdown', nil, { todo_keywords = TODO })
+      local path
+      export.export_subtree(buf, 1, 'markdown', nil, { todo_keywords = TODO }, function(p)
+        path = p
+      end)
       local written = vim.fn.readfile(path)
       assert.are.equal('# Custom Title', written[1])
       vim.fn.delete(dir, 'rf')
     end)
 
-    it('returns nil when lnum is not inside a headline', function()
+    it('calls on_done(nil) when lnum is not inside a headline', function()
       local buf = vim.api.nvim_create_buf(false, true)
       vim.api.nvim_buf_set_name(buf, '/tmp/noheadline.org')
       vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'no headline here' })
-      assert.is_nil(export.export_subtree(buf, 1, 'markdown', nil, { todo_keywords = TODO }))
+      local path = 'unset'
+      export.export_subtree(buf, 1, 'markdown', nil, { todo_keywords = TODO }, function(p)
+        path = p
+      end)
+      assert.is_nil(path)
       pcall(vim.api.nvim_buf_delete, buf, { force = true })
     end)
   end)

@@ -1244,15 +1244,22 @@ structure editing below works immediately, even before (or without) the
   override and renormalizing descendant levels so the first child
   becomes level 1 (matching real org-mode's own subtree-export
   behavior). Every `src` block is executed during export (via
-  `mep.org.babel.run_sync`, blocking synchronously — the same
-  compile-then-run/interpreter dispatch `mep.org.babel.execute` uses
-  interactively, just with no live buffer to write into) and its output
-  embedded right after the code, unless `:exports code`/`none` narrows
-  what's shown, `:eval never`/`no-export` opts the block itself out, or
-  `opts.eval = false` disables it for the whole export; `:exports
-  results` shows only the output, and `:exports none` drops the block
-  entirely. This is a deliberate deviation from real org-babel's own
-  default `:exports` value (`"code"` — nothing run/shown unless a block
+  `mep.org.babel.run_async`, the same compile-then-run/interpreter
+  dispatch `mep.org.babel.execute` uses interactively, just with no live
+  buffer to write into) and its output embedded right after the code,
+  unless `:exports code`/`none` narrows what's shown, `:eval never`/
+  `no-export` opts the block itself out, or `opts.eval = false` disables
+  it for the whole export; `:exports results` shows only the output, and
+  `:exports none` drops the block entirely. Execution is fully
+  asynchronous — `export_to_file`/`export_subtree`/`dispatch_interactive`
+  all take an `on_done` callback rather than returning the written path
+  directly, and every pending block across the document runs
+  concurrently, so a slow or compiled block never locks up the editor
+  (`parse`/`parse_lines` stay synchronous and never run babel themselves;
+  `parse_async`/`parse_lines_async` are the async pair that actually run
+  the pending jobs before handing back a fully-populated document). This
+  is a deliberate deviation from real org-babel's own default `:exports`
+  value (`"code"` — nothing run/shown unless a block
   opts in with `:exports both`/`results`); a `:cache yes` block reuses
   `mep.org.babel.results_cache` under the same key `M.execute`'s own
   `<C-c>e` would use, so exporting right after a manual run hits the
