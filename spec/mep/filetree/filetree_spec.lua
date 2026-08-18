@@ -86,7 +86,7 @@ describe('mep.filetree.filetree', function()
     it('binds the configured keymaps as buffer-local normal-mode mappings', function()
       ft.open({ root = root })
 
-      for _, lhs in ipairs({ '<CR>', 'o', 'l', 'h', 'q', 'R', 'a', 'r', 'd', '?', '<C-o>' }) do
+      for _, lhs in ipairs({ '<CR>', 'o', 'l', 'h', 'q', 'R', 'H', 'a', 'r', 'd', '?', '<C-o>' }) do
         local info = vim.fn.maparg(lhs, 'n', false, true)
         assert.are.equal(1, info.buffer, 'expected a buffer-local mapping for ' .. lhs)
       end
@@ -280,6 +280,39 @@ describe('mep.filetree.filetree', function()
     it('is a no-op before the tree has ever been opened', function()
       assert.has_no.errors(function()
         ft.refresh()
+      end)
+    end)
+  end)
+
+  describe('toggle_hidden (H)', function()
+    it('reveals dotfiles and gitignored files together, then hides them again', function()
+      write_file(root .. '/.dotfile', '')
+      vim.fn.system({ 'git', '-C', root, 'init', '-q' })
+      write_file(root .. '/.gitignore', 'ignored.txt\n')
+      write_file(root .. '/ignored.txt', '')
+
+      ft.open({ root = root })
+      local win = vim.api.nvim_get_current_win()
+      local buf = vim.api.nvim_win_get_buf(win)
+
+      local before = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
+      assert.is_not.matches('%.dotfile', before)
+      assert.is_not.matches('ignored%.txt', before)
+
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('H', true, false, true), 'x', false)
+      local shown = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
+      assert.matches('%.dotfile', shown)
+      assert.matches('ignored%.txt', shown)
+
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('H', true, false, true), 'x', false)
+      local hidden_again = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
+      assert.is_not.matches('%.dotfile', hidden_again)
+      assert.is_not.matches('ignored%.txt', hidden_again)
+    end)
+
+    it('is a no-op before the tree has ever been opened', function()
+      assert.has_no.errors(function()
+        ft.toggle_hidden()
       end)
     end)
   end)

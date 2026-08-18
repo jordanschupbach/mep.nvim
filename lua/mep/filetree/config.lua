@@ -5,6 +5,13 @@ M.defaults = {
   -- nil = use core.util.find_root() (nearest ancestor with .git) at open time
   root = nil,
   show_hidden = false,
+  -- Entries `git check-ignore` considers ignored (`.gitignore`, global
+  -- excludes, ...) — independent of `show_hidden` (dotfiles), but both
+  -- flip together under the default `toggle_hidden` keymap ('H'), since
+  -- "hidden files" reads as one user-facing concept covering both. No-op
+  -- outside a git repo, or if `git` isn't on PATH — see tree.lua's own
+  -- `gitignored_names`.
+  show_gitignored = false,
   keymaps = {
     open = { '<CR>', 'o' },
     expand = { 'l', '<Right>' },
@@ -20,6 +27,10 @@ M.defaults = {
     -- own `open`/mep.org.link's own link-following for the same
     -- mechanism used elsewhere in this project.
     open_system = { '<C-o>' },
+    -- Shift+h, not plain 'h' — 'h'/'<Left>' already means "collapse
+    -- directory / go to parent" (see `collapse` above), matching normal
+    -- vim h/l = left/right navigation.
+    toggle_hidden = { 'H' },
     help = { '?' },
   },
 }

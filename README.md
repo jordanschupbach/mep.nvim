@@ -214,6 +214,7 @@ project doesn't walk the whole filesystem up front.
 | `h` / `<Left>`  | Collapse an expanded directory, or jump to its parent            |
 | `q` / `<Esc>`   | Close the tree                                                  |
 | `R`             | Refresh                                                          |
+| `H`             | Toggle hidden files (dotfiles + gitignored entries together)    |
 | `a`             | Create a file/directory (prompts for a name relative to the node under the cursor; trailing `/` makes a directory) |
 | `r`             | Rename the file/directory under the cursor (prompts, pre-filled with its current name) |
 | `d`             | Delete the file/directory under the cursor (confirms first; directories are removed recursively) |
@@ -223,7 +224,7 @@ A horizontal rule and a "Press ? for help" hint sit below the tree
 itself, at the bottom of the panel.
 
 All configurable via `require('mep.filetree').setup({...})` —
-`width`, `root`, `show_hidden`, and `keymaps.open`/`open_system`/`expand`/`collapse`/`close`/`refresh`/`add`/`rename`/`delete`/`help`
+`width`, `root`, `show_hidden`, `show_gitignored`, and `keymaps.open`/`open_system`/`expand`/`collapse`/`close`/`refresh`/`toggle_hidden`/`add`/`rename`/`delete`/`help`
 (each a list of lhs strings). See `lua/mep/filetree/config.lua` for the
 full defaults.
 

@@ -21,8 +21,32 @@ function M.new_root(path)
   }
 end
 
-local function scan_children(dir_path, show_hidden)
-  local dirs, files = {}, {}
+--- Names (bare, relative to `dir_path`) among `names` that `git
+--- check-ignore` considers ignored there (`.gitignore` at any level,
+--- global excludes, `.git/info/exclude`, ...) — one batched `--stdin`
+--- call per directory scan rather than one process per entry. Exit code
+--- 1 just means "none of these are ignored" (not an error); 128 means
+--- `dir_path` isn't inside a git repo at all — both, and `git` missing
+--- from PATH entirely, degrade to "nothing ignored" rather than raising,
+--- the same graceful-miss contract mep.picker's own ripgrep-based search
+--- already uses when ripgrep itself is unavailable.
+local function gitignored_names(dir_path, names)
+  if #names == 0 or vim.fn.executable('git') == 0 then
+    return {}
+  end
+  local out = vim.fn.systemlist({ 'git', '-C', dir_path, 'check-ignore', '--stdin' }, names)
+  if vim.v.shell_error > 1 then
+    return {}
+  end
+  local set = {}
+  for _, name in ipairs(out) do
+    set[name] = true
+  end
+  return set
+end
+
+local function scan_children(dir_path, show_hidden, show_gitignored)
+  local names, types = {}, {}
   local fd = uv.fs_scandir(dir_path)
   if not fd then
     return {}
@@ -33,7 +57,18 @@ local function scan_children(dir_path, show_hidden)
       break
     end
     if show_hidden or not vim.startswith(name, '.') then
+      names[#names + 1] = name
+      types[name] = typ
+    end
+  end
+
+  local ignored = show_gitignored and {} or gitignored_names(dir_path, names)
+
+  local dirs, files = {}, {}
+  for _, name in ipairs(names) do
+    if not ignored[name] then
       local entry = { name = name, path = dir_path .. '/' .. name }
+      local typ = types[name]
       if typ == 'directory' then
         entry.is_dir = true
         entry.expanded = false
@@ -64,11 +99,11 @@ end
 --- Populate `node.children` (directories first, then files, both
 --- alphabetical) if not already loaded. No-op for files or already-loaded
 --- directories.
-function M.ensure_children(node, show_hidden)
+function M.ensure_children(node, show_hidden, show_gitignored)
   if not node.is_dir or node.children ~= nil then
     return
   end
-  node.children = scan_children(node.path, show_hidden)
+  node.children = scan_children(node.path, show_hidden, show_gitignored)
   for _, child in ipairs(node.children) do
     child.depth = node.depth + 1
     child.parent = node
@@ -77,13 +112,13 @@ end
 
 --- Flip a directory's expanded state, loading its children the first time
 --- it's expanded. No-op for files.
-function M.toggle_expand(node, show_hidden)
+function M.toggle_expand(node, show_hidden, show_gitignored)
   if not node.is_dir then
     return
   end
   node.expanded = not node.expanded
   if node.expanded then
-    M.ensure_children(node, show_hidden)
+    M.ensure_children(node, show_hidden, show_gitignored)
   end
 end
 
@@ -91,10 +126,10 @@ end
 --- children loaded (recursively) — call before flattening/rendering so
 --- a refresh (which invalidates caches without collapsing anything)
 --- re-populates automatically.
-function M.ensure_expanded_loaded(root, show_hidden)
+function M.ensure_expanded_loaded(root, show_hidden, show_gitignored)
   local function walk(node)
     if node.is_dir and node.expanded then
-      M.ensure_children(node, show_hidden)
+      M.ensure_children(node, show_hidden, show_gitignored)
       if node.children then
         for _, child in ipairs(node.children) do
           walk(child)

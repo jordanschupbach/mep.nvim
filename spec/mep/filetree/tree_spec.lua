@@ -97,6 +97,58 @@ describe('mep.filetree.tree', function()
     end)
   end)
 
+  describe('ensure_children with show_gitignored', function()
+    local root
+
+    before_each(function()
+      root = mktemp_dir()
+      vim.fn.system({ 'git', '-C', root, 'init', '-q' })
+      write_file(root .. '/.gitignore', 'ignored.txt\n')
+      write_file(root .. '/kept.txt', '')
+      write_file(root .. '/ignored.txt', '')
+    end)
+
+    after_each(function()
+      vim.fn.delete(root, 'rf')
+    end)
+
+    it('skips gitignored entries by default', function()
+      local node = tree.new_root(root)
+      tree.ensure_children(node, false, false)
+
+      local names = {}
+      for _, c in ipairs(node.children) do
+        names[#names + 1] = c.name
+      end
+      assert.is_false(vim.tbl_contains(names, 'ignored.txt'))
+      assert.is_true(vim.tbl_contains(names, 'kept.txt'))
+    end)
+
+    it('includes gitignored entries when show_gitignored is true', function()
+      local node = tree.new_root(root)
+      tree.ensure_children(node, false, true)
+
+      local names = {}
+      for _, c in ipairs(node.children) do
+        names[#names + 1] = c.name
+      end
+      assert.is_true(vim.tbl_contains(names, 'ignored.txt'))
+    end)
+
+    it('does not error scanning a directory outside any git repo', function()
+      local non_repo = mktemp_dir()
+      write_file(non_repo .. '/file.txt', '')
+      local node = tree.new_root(non_repo)
+
+      assert.has_no.errors(function()
+        tree.ensure_children(node, false, false)
+      end)
+      assert.are.equal(1, #node.children)
+
+      vim.fn.delete(non_repo, 'rf')
+    end)
+  end)
+
   describe('toggle_expand', function()
     it('flips expanded and loads children the first time a directory expands', function()
       local root = mktemp_dir()

@@ -19,8 +19,8 @@ local state = {
 }
 
 --- Configure the filetree library. See mep.filetree.config.defaults for
---- width/root/show_hidden/keymaps. Works with sensible defaults even if
---- this is never called.
+--- width/root/show_hidden/show_gitignored/keymaps. Works with sensible
+--- defaults even if this is never called.
 function M.setup(opts)
   return config.setup(opts)
 end
@@ -31,7 +31,7 @@ end
 M.is_open = is_open
 
 local function render()
-  tree.ensure_expanded_loaded(state.root_node, config.options.show_hidden)
+  tree.ensure_expanded_loaded(state.root_node, config.options.show_hidden, config.options.show_gitignored)
   state.nodes = tree.flatten(state.root_node)
   ui.render(state.buf, state.nodes, state.win)
 end
@@ -76,7 +76,7 @@ local function open_node()
     return
   end
   if node.is_dir then
-    tree.toggle_expand(node, config.options.show_hidden)
+    tree.toggle_expand(node, config.options.show_hidden, config.options.show_gitignored)
     render()
   else
     if state.target_win and vim.api.nvim_win_is_valid(state.target_win) then
@@ -109,7 +109,7 @@ local function expand_node()
     return
   end
   if not node.expanded then
-    tree.toggle_expand(node, config.options.show_hidden)
+    tree.toggle_expand(node, config.options.show_hidden, config.options.show_gitignored)
     render()
   end
 end
@@ -120,7 +120,7 @@ local function collapse_node()
     return
   end
   if node.is_dir and node.expanded then
-    tree.toggle_expand(node, config.options.show_hidden)
+    tree.toggle_expand(node, config.options.show_hidden, config.options.show_gitignored)
     render()
   elseif node.parent then
     set_cursor_to_node(node.parent)
@@ -270,6 +270,29 @@ function M.refresh()
   end
 end
 
+--- Flip `show_hidden` (dotfiles) and `show_gitignored` together — bound
+--- to 'H' by default. Both, not just one: "hidden files" reads as a
+--- single user-facing concept covering dotfiles and gitignored entries
+--- alike, and a lone dotfile toggle already exists as a config-only
+--- option (`show_hidden`) with no keymap of its own before this. Every
+--- already-loaded directory's `.children` was filtered under the old
+--- settings, so this re-scans from the root down (`tree.invalidate`,
+--- same as `M.refresh`) rather than just re-rendering. Public (like
+--- `M.refresh`/`M.close`), not a local like most other actions, so it's
+--- callable directly too, not just via the keymap.
+function M.toggle_hidden()
+  if not state.root_node then
+    return
+  end
+  local show = not config.options.show_hidden
+  config.options.show_hidden = show
+  config.options.show_gitignored = show
+  tree.invalidate(state.root_node)
+  if is_open() then
+    render()
+  end
+end
+
 --- Every keymap this panel binds, `lhs`/`fn`/`desc` per entry — the one
 --- source both `bind_keymaps` and the `?` help popup read from, so the
 --- two can never drift apart. A function (not a static table) since it
@@ -286,6 +309,7 @@ local function action_list()
     { lhs = keymaps.rename, fn = rename_node, desc = 'Rename the file/directory under the cursor' },
     { lhs = keymaps.delete, fn = delete_node, desc = 'Delete the file/directory under the cursor (confirms first)' },
     { lhs = keymaps.refresh, fn = M.refresh, desc = 'Refresh the file tree' },
+    { lhs = keymaps.toggle_hidden, fn = M.toggle_hidden, desc = 'Toggle hidden (dotfiles + gitignored) files' },
     { lhs = keymaps.close, fn = M.close, desc = 'Close the file tree' },
     { lhs = keymaps.help, fn = M.toggle_help, desc = 'Toggle this help' },
   }
