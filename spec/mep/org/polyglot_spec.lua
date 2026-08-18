@@ -324,22 +324,28 @@ describe('mep.org.polyglot', function()
   end)
 
   describe('on_block_executed', function()
-    local orig_executable, orig_get_clients
+    local orig_executable, orig_get_clients, orig_detach, orig_attach
 
     before_each(function()
       orig_executable = vim.fn.executable
       orig_get_clients = vim.lsp.get_clients
+      orig_detach = vim.lsp.buf_detach_client
+      orig_attach = vim.lsp.buf_attach_client
       vim.fn.executable = function(name)
         return name == 'g++' and 1 or 0
       end
       vim.lsp.get_clients = function()
         return {}
       end
+      vim.lsp.buf_detach_client = function() end
+      vim.lsp.buf_attach_client = function() end
     end)
 
     after_each(function()
       vim.fn.executable = orig_executable
       vim.lsp.get_clients = orig_get_clients
+      vim.lsp.buf_detach_client = orig_detach
+      vim.lsp.buf_attach_client = orig_attach
     end)
 
     it('writes a compile_commands.json entry matching the real compile invocation', function()
@@ -372,6 +378,7 @@ describe('mep.org.polyglot', function()
         assert.are.equal(ctx.shadow_bufnr, opts.bufnr)
         return {
           {
+            id = 7,
             notify = function(_, method, params)
               notified = { method = method, params = params }
             end,
@@ -385,6 +392,32 @@ describe('mep.org.polyglot', function()
       assert.are.equal('workspace/didChangeWatchedFiles', notified.method)
       assert.are.equal(vim.uri_from_fname(dir .. '/compile_commands.json'), notified.params.changes[1].uri)
       assert.are.equal(2, notified.params.changes[1].type)
+    end)
+
+    it('forces a real reparse via detach+reattach, not just the didChangeWatchedFiles notification', function()
+      -- didChangeWatchedFiles alone doesn't make clangd re-derive compile
+      -- flags for an already-open document (confirmed empirically against
+      -- a real clangd — see this function's own comment); the
+      -- detach/reattach cycle is what actually forces the reparse.
+      local bufnr = buf({ '#+begin_src cpp', 'int a = 1;', '#+end_src' })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local ctx = polyglot.context_at_cursor(bufnr, 2)
+
+      vim.lsp.get_clients = function()
+        return { { id = 7, notify = function() end } }
+      end
+      local detach_calls, attach_calls = {}, {}
+      vim.lsp.buf_detach_client = function(bufnr_arg, client_id)
+        table.insert(detach_calls, { bufnr = bufnr_arg, client_id = client_id })
+      end
+      vim.lsp.buf_attach_client = function(bufnr_arg, client_id)
+        table.insert(attach_calls, { bufnr = bufnr_arg, client_id = client_id })
+      end
+
+      polyglot.on_block_executed(bufnr, 2)
+
+      assert.are.same({ { bufnr = ctx.shadow_bufnr, client_id = 7 } }, detach_calls)
+      assert.are.same({ { bufnr = ctx.shadow_bufnr, client_id = 7 } }, attach_calls)
     end)
 
     it('is a no-op (nothing written, no error) when the block was never visited (no shadow yet)', function()

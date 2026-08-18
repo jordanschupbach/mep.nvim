@@ -1220,6 +1220,55 @@ describe('mep.org.org', function()
       org.setup({ fold = false })
       assert.is_not_nil(vim.api.nvim_get_hl(0, { name = babelhl.hl_group }))
     end)
+
+    it('recomputes on LspAttach/LspDetach firing for a *different* buffer (e.g. a polyglot shadow buffer)', function()
+      -- mep.org.polyglot's shadow buffers are what a src block's own LSP
+      -- client actually attaches to, never the org buffer itself — a
+      -- LspAttach/LspDetach autocmd scoped to `buffer = bufnr` (the org
+      -- buffer) would therefore never fire for it at all, leaving this
+      -- annotation stuck reporting "no LSP" forever even once a real
+      -- client is attached and publishing diagnostics. Confirmed the
+      -- fix by simulating exactly that: an LspAttach on some unrelated
+      -- buffer still triggers a recompute for this org buffer.
+      stub_install()
+      org.setup({ fold = false })
+
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_set_current_buf(buf)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '#+begin_src lua', 'print(1)', '#+end_src' })
+      vim.bo[buf].filetype = 'org'
+
+      local orig_apply = babelhl.apply
+      local applied_for
+      babelhl.apply = function(b)
+        applied_for = b
+        orig_apply(b)
+      end
+
+      local other_buf = vim.api.nvim_create_buf(false, true)
+      applied_for = nil
+      vim.api.nvim_exec_autocmds('LspAttach', { buffer = other_buf })
+
+      babelhl.apply = orig_apply
+      assert.are.equal(buf, applied_for)
+    end)
+
+    it('tears down its LspAttach/LspDetach autocmd when the org buffer is wiped (no error on a later attach elsewhere)', function()
+      stub_install()
+      org.setup({ fold = false })
+
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_set_current_buf(buf)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '#+begin_src lua', 'print(1)', '#+end_src' })
+      vim.bo[buf].filetype = 'org'
+
+      vim.api.nvim_buf_delete(buf, { force = true })
+
+      local other_buf = vim.api.nvim_create_buf(false, true)
+      assert.has_no.errors(function()
+        vim.api.nvim_exec_autocmds('LspAttach', { buffer = other_buf })
+      end)
+    end)
   end)
 
   describe('headline color highlight', function()

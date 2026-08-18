@@ -11,7 +11,7 @@ int main() {
 }
 #+END_SRC
 #+RESULTS:
-: Hello, world
+: Hellozz, world
 
 * C Main File Example
 

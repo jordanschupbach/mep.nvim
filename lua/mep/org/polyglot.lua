@@ -525,18 +525,28 @@ end
 --- `PER_BLOCK_LANGS` (c/cpp), regenerates that block's own `compile_
 --- commands.json` to match exactly what babel just compiled (same
 --- compiler `mep.org.babel.execute` itself resolves, via `babel.
---- resolve_executable`) and notifies its shadow buffer's attached
---- client(s) that the file changed, so clangd reloads its compilation
---- database and reparses the already-open shadow buffer with real flags
---- — no client restart needed: `workspace/didChangeWatchedFiles` is the
---- protocol-correct way to tell a server an on-disk file it cares about
---- changed. A no-op if polyglot isn't set up for `bufnr`, the block at
---- `lnum` isn't found, its language isn't `PER_BLOCK_LANGS`, its shadow
---- was never created (cursor never visited it — nothing to attach flags
---- to yet), or no compiler was resolved (mirrors `M.execute`'s own
---- graceful-miss). Deliberately runs regardless of the block's own exit
---- code — the compile *command* it documents doesn't depend on whether
---- this particular run happened to fail.
+--- resolve_executable`) and forces its shadow buffer's attached client(s)
+--- to actually pick the new flags up. This is *not* a full client
+--- restart — the client itself keeps running, still attached to every
+--- other buffer — just a proper close+reopen of this one document
+--- (`vim.lsp.buf_detach_client`/`buf_attach_client`, real `didClose`/
+--- `didOpen` through Neovim's own client bookkeeping rather than
+--- hand-crafted notify calls that would desync its internal document/
+--- version tracking). A `workspace/didChangeWatchedFiles` notification
+--- goes out first too (the protocol-correct "a file you care about
+--- changed" signal, e.g. for a server's own index-cache invalidation) —
+--- but confirmed empirically (clangd 21.1.8) that it alone does *not*
+--- make clangd re-derive compile flags for an already-open document and
+--- reparse it; the diagnostics it already computed under the old
+--- fallback flags just sit there until the document is properly closed
+--- and reopened, which is what the detach/reattach actually forces. A
+--- no-op if polyglot isn't set up for `bufnr`, the block at `lnum` isn't
+--- found, its language isn't `PER_BLOCK_LANGS`, its shadow was never
+--- created (cursor never visited it — nothing to attach flags to yet),
+--- or no compiler was resolved (mirrors `M.execute`'s own graceful-miss).
+--- Deliberately runs regardless of the block's own exit code — the
+--- compile *command* it documents doesn't depend on whether this
+--- particular run happened to fail.
 function M.on_block_executed(bufnr, lnum)
   local st = state[bufnr]
   if not st then
@@ -571,6 +581,8 @@ function M.on_block_executed(bufnr, lnum)
     client:notify('workspace/didChangeWatchedFiles', {
       changes = { { uri = vim.uri_from_fname(cdb_path), type = 2 } }, -- 2 = Changed
     })
+    vim.lsp.buf_detach_client(entry.bufnr, client.id)
+    vim.lsp.buf_attach_client(entry.bufnr, client.id)
   end
 end
 

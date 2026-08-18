@@ -467,11 +467,40 @@ local function apply_babel_status_highlight(bufnr, options)
   end
   babelhl.define_default_hl()
   babelhl.apply(bufnr)
-  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'InsertLeave', 'LspAttach', 'LspDetach' }, {
+  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'InsertLeave' }, {
     group = augroup,
     buffer = bufnr,
     callback = function()
       babelhl.apply(bufnr)
+    end,
+  })
+  -- LspAttach/LspDetach deliberately NOT scoped to `buffer = bufnr`: a
+  -- mep.org.polyglot shadow buffer's client attaches to the *shadow*
+  -- buffer, never to this org buffer itself, so a bufnr-scoped autocmd
+  -- would never fire for it at all — confirmed the hard way (a client
+  -- attaching and even publishing real diagnostics while this annotation
+  -- kept reporting "no LSP" forever). `babelhl.lsp_active_for`'s own
+  -- contract is already global anyway ("is a client for this language
+  -- running anywhere in the session", not "attached to this buffer"), so
+  -- recomputing on every attach/detach anywhere is exactly right, not a
+  -- workaround. Buffer-scoped autocmds die with their buffer
+  -- automatically; this one doesn't, so it's torn down explicitly on
+  -- BufWipeout/BufDelete, mirroring mep.org.polyglot's own cleanup for
+  -- exactly the same "non-buffer-scoped autocmd" shape.
+  local lsp_autocmd_id = vim.api.nvim_create_autocmd({ 'LspAttach', 'LspDetach' }, {
+    group = augroup,
+    callback = function()
+      if vim.api.nvim_buf_is_valid(bufnr) then
+        babelhl.apply(bufnr)
+      end
+    end,
+  })
+  vim.api.nvim_create_autocmd({ 'BufWipeout', 'BufDelete' }, {
+    group = augroup,
+    buffer = bufnr,
+    once = true,
+    callback = function()
+      pcall(vim.api.nvim_del_autocmd, lsp_autocmd_id)
     end,
   })
 end

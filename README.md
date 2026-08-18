@@ -1438,9 +1438,16 @@ structure editing below works immediately, even before (or without) the
     with no flags at all the first time you visit a block, same as always;
     only after you actually run it (`<C-c><C-c>`/`<C-c>e`) does that
     block's own `compile_commands.json` get (re)generated from the exact
-    compiler `mep.org.babel.execute` itself resolved, and clangd gets a
-    `workspace/didChangeWatchedFiles` nudge so it reloads and reparses
-    immediately — no client restart. This still won't resolve a *missing*
+    compiler `mep.org.babel.execute` itself resolved. Not a full client
+    restart — clangd itself keeps running, still attached to every other
+    block — just that one block's own document being properly closed and
+    reopened (`vim.lsp.buf_detach_client`/`buf_attach_client`) right after
+    a `workspace/didChangeWatchedFiles` notification goes out; confirmed
+    empirically that the notification alone doesn't make clangd re-derive
+    flags and reparse an already-open document on its own — the
+    diagnostics it already computed under the old fallback flags just sit
+    there until the document is actually reopened. This still won't
+    resolve a *missing*
     `#include` in a synthetically-wrapped (`:main yes`) block's own text
     (a separate, pre-existing limitation — see the `:main yes` paragraph
     above); a self-contained (`:main no`, the default) block that already
