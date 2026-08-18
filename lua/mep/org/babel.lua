@@ -1136,27 +1136,17 @@ local function first_error_line(stderr)
   end
   return stderr[1]
 end
+M.first_error_line = first_error_line
 
---- Execute the source block at `lnum` and write its output into a
---- `#+RESULTS:` block below it. `:results value` (vs. the default
---- `output`) is recognized by substring match, so `:results value
---- table` etc. still count as "value" — real org-mode's `:results`
---- accepts several space-separated flags at once, this project only
---- distinguishes the value/output axis. A failed run (nonzero exit)
---- still writes whatever stdout it produced, and separately warns via
---- `vim.notify` with the first substantive line of stderr (see
---- `first_error_line`), so failures are visible without being silently
---- swallowed into an empty results block.
-function M.execute(bufnr, lnum, on_done)
-  local block = M.at_cursor(bufnr, lnum)
-  if not block then
-    vim.notify('mep.org: no source block at cursor', vim.log.levels.WARN)
-    return
-  end
-  local lang_def = M.languages[block.lang:lower()]
+--- `lang`'s language def and resolved executable, or `nil, err` (a ready-
+--- to-notify message string) if the language is unsupported or has no
+--- interpreter on PATH. Shared by `M.execute` (interactive) and `M.
+--- run_sync` (blocking, no live buffer) — both need identical failure
+--- messages for the same two failure modes.
+local function resolve_language(lang)
+  local lang_def = M.languages[lang:lower()]
   if not lang_def then
-    vim.notify('mep.org: unsupported babel language "' .. block.lang .. '"', vim.log.levels.WARN)
-    return
+    return nil, 'mep.org: unsupported babel language "' .. lang .. '"'
   end
   local exe = M.resolve_executable(lang_def)
   if not exe then
@@ -1164,24 +1154,18 @@ function M.execute(bufnr, lnum, on_done)
     if lang_def.fallback_executable then
       wanted = wanted .. '/' .. lang_def.fallback_executable
     end
-    vim.notify('mep.org: no ' .. block.lang .. ' interpreter found on PATH (looked for ' .. wanted .. ')', vim.log.levels.WARN)
-    return
+    return nil, 'mep.org: no ' .. lang .. ' interpreter found on PATH (looked for ' .. wanted .. ')'
   end
+  return lang_def, exe
+end
 
-  local args = M.parse_header_args(block.args)
-
-  if args.cache == 'yes' then
-    local cache_key = M.cache_key(bufnr, block)
-    local cached = M.results_cache[cache_key]
-    if cached then
-      M.insert_or_update_results(bufnr, block.end_lnum, cached)
-      if on_done then
-        on_done(0, cached, {})
-      end
-      return
-    end
-  end
-
+--- Build the final script text to run for `lang_key`/`args`/`body`: `:var`
+--- prelude assignments, the body itself (via `build_script`, honoring
+--- `:results value`), then `wrap_main` if `lang_def` has one and `args`
+--- opts into it (see `M.should_wrap_main`). Shared by `M.execute` and `M.
+--- run_sync` — script construction is identical either way, only how the
+--- result gets run/reported differs.
+local function prepare_script(lang_key, lang_def, args, body)
   local results_mode = (args.results and args.results:match('value')) and 'value' or 'output'
   local prelude = {}
   for _, assignment in ipairs(args.var) do
@@ -1191,8 +1175,8 @@ function M.execute(bufnr, lnum, on_done)
     end
   end
 
-  local script_lines = build_script(lang_def, prelude, block.body, results_mode)
-  if lang_def.wrap_main and M.should_wrap_main(block.lang:lower(), args) then
+  local script_lines = build_script(lang_def, prelude, body, results_mode)
+  if lang_def.wrap_main and M.should_wrap_main(lang_key, args) then
     local includes = {}
     if args.includes then
       for inc in args.includes:gmatch('%S+') do
@@ -1201,23 +1185,19 @@ function M.execute(bufnr, lnum, on_done)
     end
     script_lines = lang_def.wrap_main(includes, script_lines)
   end
+  return script_lines
+end
+
+--- Write `script_lines` to a temp file and run it (compiled or not,
+--- exactly like `M.execute`'s own dispatch), calling `on_finish(code,
+--- stdout, stderr, failure_verb)` exactly once when the whole run (for a
+--- compiled language: compile, then execute) settles. `args` supplies
+--- `:classname` (Java only). No buffer/notification side effects here —
+--- both callers (`M.execute`, writing results into a live buffer; `M.
+--- run_sync`, returning them to a blocking caller) own that themselves.
+local function spawn_script(lang_def, exe, script_lines, args, on_finish)
   local source_path = vim.fn.tempname() .. lang_def.extension
   vim.fn.writefile(script_lines, source_path)
-
-  local function finish(code, stdout, stderr, failure_verb)
-    if code ~= 0 then
-      vim.notify(
-        'mep.org: babel ' .. failure_verb .. ' failed (' .. block.lang .. '): ' .. (first_error_line(stderr) or ('exit code ' .. code)),
-        vim.log.levels.WARN
-      )
-    elseif args.cache == 'yes' then
-      M.results_cache[M.cache_key(bufnr, block)] = stdout
-    end
-    M.insert_or_update_results(bufnr, block.end_lnum, stdout)
-    if on_done then
-      on_done(code, stdout, stderr)
-    end
-  end
 
   if lang_def.compiled then
     local binary_path = vim.fn.tempname()
@@ -1237,7 +1217,7 @@ function M.execute(bufnr, lnum, on_done)
       on_exit = function(compile_code)
         pcall(vim.fn.delete, source_path)
         if compile_code ~= 0 then
-          finish(compile_code, {}, compile_stderr, 'compilation')
+          on_finish(compile_code, {}, compile_stderr, 'compilation')
           return
         end
         local stdout, stderr = {}, {}
@@ -1251,7 +1231,7 @@ function M.execute(bufnr, lnum, on_done)
           end,
           on_exit = function(run_code)
             pcall(vim.fn.delete, binary_path, lang_def.run_compiled_cmd and 'rf' or nil)
-            finish(run_code, stdout, stderr, 'execution')
+            on_finish(run_code, stdout, stderr, 'execution')
           end,
         })
       end,
@@ -1276,9 +1256,95 @@ function M.execute(bufnr, lnum, on_done)
     end,
     on_exit = function(code)
       pcall(vim.fn.delete, source_path)
-      finish(code, stdout, stderr, 'execution')
+      on_finish(code, stdout, stderr, 'execution')
     end,
   })
+end
+
+--- Execute the source block at `lnum` and write its output into a
+--- `#+RESULTS:` block below it. `:results value` (vs. the default
+--- `output`) is recognized by substring match, so `:results value
+--- table` etc. still count as "value" — real org-mode's `:results`
+--- accepts several space-separated flags at once, this project only
+--- distinguishes the value/output axis. A failed run (nonzero exit)
+--- still writes whatever stdout it produced, and separately warns via
+--- `vim.notify` with the first substantive line of stderr (see
+--- `first_error_line`), so failures are visible without being silently
+--- swallowed into an empty results block.
+function M.execute(bufnr, lnum, on_done)
+  local block = M.at_cursor(bufnr, lnum)
+  if not block then
+    vim.notify('mep.org: no source block at cursor', vim.log.levels.WARN)
+    return
+  end
+  local lang_def, exe = resolve_language(block.lang)
+  if not lang_def then
+    vim.notify(exe, vim.log.levels.WARN) -- `exe` holds the error message on failure
+    return
+  end
+
+  local args = M.parse_header_args(block.args)
+
+  if args.cache == 'yes' then
+    local cache_key = M.cache_key(bufnr, block)
+    local cached = M.results_cache[cache_key]
+    if cached then
+      M.insert_or_update_results(bufnr, block.end_lnum, cached)
+      if on_done then
+        on_done(0, cached, {})
+      end
+      return
+    end
+  end
+
+  local script_lines = prepare_script(block.lang:lower(), lang_def, args, block.body)
+
+  spawn_script(lang_def, exe, script_lines, args, function(code, stdout, stderr, failure_verb)
+    if code ~= 0 then
+      vim.notify(
+        'mep.org: babel ' .. failure_verb .. ' failed (' .. block.lang .. '): ' .. (first_error_line(stderr) or ('exit code ' .. code)),
+        vim.log.levels.WARN
+      )
+    elseif args.cache == 'yes' then
+      M.results_cache[M.cache_key(bufnr, block)] = stdout
+    end
+    M.insert_or_update_results(bufnr, block.end_lnum, stdout)
+    if on_done then
+      on_done(code, stdout, stderr)
+    end
+  end)
+end
+
+--- Execute `body` (a `#+begin_src <lang> ...` block's body, not tied to any
+--- particular buffer) synchronously — blocks the editor via `vim.wait`
+--- until the whole run (for a compiled language: compile, then execute)
+--- settles. `args` is an already-parsed header-args table (`M.
+--- parse_header_args`'s own shape). Used by `mep.org.export` to embed
+--- fresh babel output in an exported document, where there's no live
+--- buffer/cursor for `M.execute`'s own async-callback-into-the-buffer
+--- contract to make sense. Returns `code, stdout, stderr` on completion,
+--- or `nil, err` (a ready-to-notify message string) if the language is
+--- unsupported/has no interpreter on PATH, or the run didn't settle within
+--- 30s (a hung/runaway block shouldn't be able to freeze an export
+--- indefinitely).
+function M.run_sync(lang, args, body)
+  local lang_def, exe = resolve_language(lang)
+  if not lang_def then
+    return nil, exe -- `exe` holds the error message on failure
+  end
+  local script_lines = prepare_script(lang:lower(), lang_def, args, body)
+
+  local done, code, stdout, stderr
+  spawn_script(lang_def, exe, script_lines, args, function(c, out, err)
+    done, code, stdout, stderr = true, c, out, err
+  end)
+  vim.wait(30000, function()
+    return done == true
+  end, 10)
+  if not done then
+    return nil, 'mep.org: babel execution timed out (' .. lang .. ')'
+  end
+  return code, stdout, stderr
 end
 
 --- The absolute path a block should tangle to, from its `:tangle`

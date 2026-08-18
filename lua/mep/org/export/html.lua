@@ -143,8 +143,13 @@ function M.render(doc)
       end
       out[#out + 1] = '<li>' .. text
     elseif b.type == 'src' then
-      local cls = b.lang and b.lang ~= '' and (' class="language-' .. escape(b.lang) .. '"') or ''
-      out[#out + 1] = '<pre><code' .. cls .. '>' .. escape(table.concat(b.body, '\n')) .. '</code></pre>'
+      if b.show_code then
+        local cls = b.lang and b.lang ~= '' and (' class="language-' .. escape(b.lang) .. '"') or ''
+        out[#out + 1] = '<pre><code' .. cls .. '>' .. escape(table.concat(b.body, '\n')) .. '</code></pre>'
+      end
+      if b.results and #b.results > 0 then
+        out[#out + 1] = '<pre class="results">' .. escape(table.concat(b.results, '\n')) .. '</pre>'
+      end
     elseif b.type == 'block' then
       if b.kind == 'quote' then
         out[#out + 1] = '<blockquote>'

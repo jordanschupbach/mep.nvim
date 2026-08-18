@@ -123,6 +123,10 @@ vim.api.nvim_create_user_command('MepLiveGrep', function()
   require('mep.picker').live_grep()
 end, { desc = 'mep.nvim: live grep the project (requires rg)' })
 
+vim.api.nvim_create_user_command('MepProjectSearch', function()
+  require('mep.picker').live_grep()
+end, { desc = 'mep.nvim: search project contents (requires rg)' })
+
 vim.api.nvim_create_user_command('MepBufferSearch', function()
   require('mep.picker').buffer_search()
 end, { desc = 'mep.nvim: fuzzy-find lines in the current buffer' })

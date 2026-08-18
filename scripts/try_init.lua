@@ -38,6 +38,7 @@ vim.keymap.set('n', '<leader>bs', '<cmd>MepScratch<cr>', { desc = 'mep: open scr
 vim.keymap.set('n', '<leader>fg', '<cmd>MepLiveGrep<cr>', { desc = 'mep: live grep' })
 vim.keymap.set('n', '<leader>fb', '<cmd>MepBufferSearch<cr>', { desc = 'mep: buffer search' })
 vim.keymap.set('n', '<leader>po', '<cmd>MepProjects<cr>', { desc = 'mep: switch projects' })
+vim.keymap.set('n', '<leader>pr', '<cmd>MepProjectSearch<cr>', { desc = 'mep: project search' })
 
 -- Deliberately no startup vim.notify() and no `:edit` of a starting file
 -- here: a multi-line notify at VimEnter exceeds the default cmdheight (1)

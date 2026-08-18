@@ -351,6 +351,79 @@ describe('mep.org.babel', function()
     end)
   end)
 
+  describe('run_sync', function()
+    local orig_jobstart, orig_executable
+    local captured_cmd
+
+    before_each(function()
+      orig_jobstart = vim.fn.jobstart
+      orig_executable = vim.fn.executable
+      captured_cmd = nil
+      vim.fn.executable = function(name)
+        return name == 'lua' and 1 or 0
+      end
+      -- Resolves synchronously — `M.run_sync` blocks on `vim.wait` until
+      -- its own callback marks the run done, so (per spec/README.md's
+      -- mocking convention for anything touching vim.fn.jobstart) the
+      -- callbacks fire from inside the mock itself, before it returns,
+      -- rather than being driven by hand afterwards the way `M.execute`'s
+      -- own (genuinely async) tests do.
+      vim.fn.jobstart = function(cmd, opts)
+        captured_cmd = cmd
+        opts.on_stdout(1, { '1', '' })
+        opts.on_exit(1, 0)
+        return 1
+      end
+    end)
+
+    after_each(function()
+      vim.fn.jobstart = orig_jobstart
+      vim.fn.executable = orig_executable
+    end)
+
+    it('runs the block and returns code/stdout/stderr synchronously', function()
+      local code, stdout, stderr = babel.run_sync('lua', { var = {} }, { 'print(1)' })
+      assert.are.equal(0, code)
+      assert.are.same({ '1' }, stdout)
+      assert.are.same({}, stderr)
+      assert.are.equal('lua', captured_cmd[1])
+    end)
+
+    it('applies :var/:results value the same way M.execute does', function()
+      -- Read the script inside the mock itself, before on_exit's own
+      -- cleanup deletes it — unlike M.execute's tests, on_exit fires
+      -- synchronously here (see this describe block's own before_each
+      -- comment), so nothing survives past the `run_sync` call to
+      -- inspect afterwards.
+      local written
+      vim.fn.jobstart = function(cmd, opts)
+        captured_cmd = cmd
+        written = vim.fn.readfile(cmd[2])
+        opts.on_stdout(1, { '1', '' })
+        opts.on_exit(1, 0)
+        return 1
+      end
+      babel.run_sync('lua', { var = { 'x=5' }, results = 'value' }, { 'local y = 2', 'y + 1' })
+      assert.are.same({ 'local x = 5', 'local y = 2', 'print(y + 1)' }, written)
+    end)
+
+    it('returns nil, err for an unsupported language without spawning anything', function()
+      local code, err = babel.run_sync('cobol', { var = {} }, { 'x' })
+      assert.is_nil(code)
+      assert.matches('unsupported babel language', err)
+      assert.is_nil(captured_cmd)
+    end)
+
+    it('returns nil, err when no interpreter is found on PATH', function()
+      vim.fn.executable = function()
+        return 0
+      end
+      local code, err = babel.run_sync('lua', { var = {} }, { 'x' })
+      assert.is_nil(code)
+      assert.matches('no lua interpreter found', err)
+    end)
+  end)
+
   describe('cache (:cache yes)', function()
     local orig_jobstart, orig_executable, orig_notify
     local spawn_count

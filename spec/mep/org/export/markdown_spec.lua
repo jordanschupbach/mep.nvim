@@ -1,8 +1,13 @@
 local export = require('mep.org.export')
 local markdown = require('mep.org.export.markdown')
 
-local function render(lines)
-  local doc = export.parse_lines(lines, { todo_keywords = { 'TODO', 'DONE' } })
+local function render(lines, opts)
+  opts = opts or {}
+  opts.todo_keywords = opts.todo_keywords or { 'TODO', 'DONE' }
+  if opts.eval == nil then
+    opts.eval = false -- these tests check rendering shape, not babel execution
+  end
+  local doc = export.parse_lines(lines, opts)
   return markdown.render(doc)
 end
 
@@ -59,6 +64,32 @@ describe('mep.org.export.markdown', function()
     local out = render({ '#+begin_src python', 'print(1)', '#+end_src' })
     assert.is_true(vim.tbl_contains(out, '```python'))
     assert.is_true(vim.tbl_contains(out, 'print(1)'))
+  end)
+
+  it('fences babel results right after the code block', function()
+    local doc = { footnotes = {}, options = {}, blocks = { { type = 'src', lang = 'python', body = { 'print(1)' }, results = { '1' }, show_code = true } } }
+    local out = markdown.render(doc)
+    assert.is_true(vim.tbl_contains(out, '```python'))
+    assert.is_true(vim.tbl_contains(out, '1'))
+  end)
+
+  it('omits the code fence when show_code is false (:exports results)', function()
+    local doc = { footnotes = {}, options = {}, blocks = { { type = 'src', lang = 'python', body = { 'print(1)' }, results = { '1' }, show_code = false } } }
+    local out = markdown.render(doc)
+    assert.is_false(vim.tbl_contains(out, '```python'))
+    assert.is_true(vim.tbl_contains(out, '1'))
+  end)
+
+  it('omits a results fence entirely when there is no output', function()
+    local doc = { footnotes = {}, options = {}, blocks = { { type = 'src', lang = 'python', body = { 'print(1)' }, results = {}, show_code = true } } }
+    local out = markdown.render(doc)
+    local fence_count = 0
+    for _, l in ipairs(out) do
+      if l == '```' or l == '```python' then
+        fence_count = fence_count + 1
+      end
+    end
+    assert.are.equal(2, fence_count)
   end)
 
   it('renders a quote block as a blockquote', function()

@@ -28,6 +28,7 @@ local include_mod = require('mep.org.include')
 local footnote_mod = require('mep.org.footnote')
 local link_mod = require('mep.org.link')
 local property_mod = require('mep.org.property')
+local babel_mod = require('mep.org.babel')
 
 local M = {}
 
@@ -154,6 +155,46 @@ local function consume_list(lines, i, expand)
   return items, i
 end
 
+--- `:eval` values that opt a src block out of export-time execution — real
+--- org-babel's own `no`/`never` (never evaluate at all) and `no-export`/
+--- `never-export` (evaluate interactively, but not during export).
+local EVAL_SKIP_EXPORT = { no = true, never = true, ['no-export'] = true, ['never-export'] = true }
+
+--- Execute one export-time src block synchronously (`mep.org.babel.
+--- run_sync`) and return its captured stdout lines, or nil if the
+--- language couldn't be resolved or the run failed — either way a
+--- `vim.notify` warning is shown and the rest of the export still
+--- proceeds, the same "degrade gracefully, don't abort" contract `mep.
+--- org.babel.execute`'s own per-block failure paths already have.
+--- `:cache yes` reuses `mep.org.babel.results_cache` under the exact key
+--- `mep.org.babel.execute`'s own `:cache yes` path would use for the same
+--- block position/body/args, so exporting right after a manual `<C-c>e`
+--- on the same block hits the cache instead of re-running it.
+local function run_export_babel(bufnr, blk, lang, hargs, header_str)
+  local cache_key
+  if hargs.cache == 'yes' then
+    cache_key = babel_mod.cache_key(bufnr or -1, { start_lnum = blk.start_lnum, body = blk.body, args = header_str })
+    local cached = babel_mod.results_cache[cache_key]
+    if cached then
+      return cached
+    end
+  end
+  local code, stdout, stderr = babel_mod.run_sync(lang, hargs, blk.body)
+  if code == nil then
+    vim.notify(stdout, vim.log.levels.WARN) -- `stdout` holds the error message on failure
+    return nil
+  end
+  if code ~= 0 then
+    vim.notify(
+      'mep.org: export babel execution failed (' .. lang .. '): ' .. (babel_mod.first_error_line(stderr) or ('exit code ' .. code)),
+      vim.log.levels.WARN
+    )
+  elseif hargs.cache == 'yes' then
+    babel_mod.results_cache[cache_key] = stdout
+  end
+  return stdout
+end
+
 --- Build the flat, ordered `blocks` list for `lines` given already-known
 --- document metadata (`doc.macros`, used to expand `{{{name}}}` in
 --- paragraph/list-item/headline text and quote/verse/center block bodies
@@ -162,7 +203,19 @@ end
 --- org-mode's default `org-export-exclude-tags`) is skipped along with
 --- its entire subtree. Also returns `footnotes`, an ordered list of
 --- `{ name, text }` collected from standalone `[fn:name] text` lines.
-local function build_blocks(lines, todo_keywords, macros)
+---
+--- Every `src` block is executed (via `run_export_babel`, unless `opts.
+--- eval == false` or the block's own `:eval no`/`no-export`/`never`/
+--- `never-export`) and its output attached as the block's own `results`
+--- field, rendered by each backend right after the code. This is a
+--- deliberate deviation from real org-babel's own default `:exports`
+--- value (`"code"` — code shown, nothing run/shown for output unless a
+--- block opts in with `:exports both`/`results`): asked to make "export
+--- actually runs the code", the more useful default for this project is
+--- the reverse — run and show output by default, with `:exports code`/
+--- `none`/`results` as the opt-out/narrowing knobs real org-mode also
+--- uses for those exact values.
+local function build_blocks(lines, todo_keywords, macros, opts)
   local function expand(text)
     return macro_mod.expand(text, macros)
   end
@@ -255,7 +308,16 @@ local function build_blocks(lines, todo_keywords, macros)
     if blk then
       if blk.kind == 'src' then
         local lang = (blk.args or ''):match('^(%S*)') or ''
-        blocks[#blocks + 1] = { type = 'src', lang = lang, body = blk.body }
+        local header_str = (blk.args or ''):match('^%S*%s*(.*)$') or ''
+        local hargs = babel_mod.parse_header_args(header_str)
+        local exports = hargs.exports or 'both'
+        if exports ~= 'none' then
+          local results = nil
+          if opts.eval ~= false and exports ~= 'code' and not EVAL_SKIP_EXPORT[hargs.eval] then
+            results = run_export_babel(opts.bufnr, blk, lang, hargs, header_str)
+          end
+          blocks[#blocks + 1] = { type = 'src', lang = lang, body = blk.body, results = results, show_code = exports ~= 'results' }
+        end
       elseif blk.kind == 'quote' or blk.kind == 'verse' or blk.kind == 'center' then
         local body = {}
         for _, l in ipairs(blk.body) do
@@ -339,11 +401,15 @@ end
 
 --- Parse `lines` (already include-resolved, if desired) into a document:
 --- `{ title, author, date, options, blocks, footnotes }`. `opts.
---- todo_keywords` matches the rest of mep.org (default `{}`).
+--- todo_keywords` matches the rest of mep.org (default `{}`). `opts.eval
+--- == false` disables export-time babel execution entirely (see
+--- `build_blocks`'s own comment); `opts.bufnr`, if given, namespaces
+--- `:cache yes` src blocks the same way `mep.org.babel.execute`'s own
+--- cache keys are namespaced by buffer.
 function M.parse_lines(lines, opts)
   opts = opts or {}
   local doc = scan_metadata(lines)
-  local blocks, footnotes = build_blocks(lines, opts.todo_keywords or {}, doc.macros)
+  local blocks, footnotes = build_blocks(lines, opts.todo_keywords or {}, doc.macros, opts)
   if truthy_option(doc, 'num', true) then
     number_headlines(blocks)
   end
@@ -358,6 +424,7 @@ end
 --- directory) unless `opts.resolve_includes == false`.
 function M.parse(bufnr, opts)
   opts = opts or {}
+  opts.bufnr = opts.bufnr or bufnr
   local lines
   if opts.resolve_includes == false then
     lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
@@ -499,6 +566,7 @@ end
 --- given/derivable.
 function M.export_subtree(bufnr, lnum, backend_name, path, opts)
   opts = opts or {}
+  opts.bufnr = opts.bufnr or bufnr
   local todo_keywords = opts.todo_keywords or {}
   local at = outline_mod.current_headline(bufnr, lnum)
   if not at then

@@ -1,8 +1,13 @@
 local export = require('mep.org.export')
 local ascii = require('mep.org.export.ascii')
 
-local function render(lines)
-  local doc = export.parse_lines(lines, { todo_keywords = { 'TODO', 'DONE' } })
+local function render(lines, opts)
+  opts = opts or {}
+  opts.todo_keywords = opts.todo_keywords or { 'TODO', 'DONE' }
+  if opts.eval == nil then
+    opts.eval = false -- these tests check rendering shape, not babel execution
+  end
+  local doc = export.parse_lines(lines, opts)
   return ascii.render(doc)
 end
 
@@ -68,6 +73,20 @@ describe('mep.org.export.ascii', function()
   it('indents a src block body by 4 spaces', function()
     local out = render({ '#+begin_src lua', 'print(1)', '#+end_src' })
     assert.is_true(vim.tbl_contains(out, '    print(1)'))
+  end)
+
+  it('prefixes babel results with ": ", after the indented code', function()
+    local doc = { footnotes = {}, options = {}, blocks = { { type = 'src', lang = 'lua', body = { 'print(1)' }, results = { '1' }, show_code = true } } }
+    local out = ascii.render(doc)
+    assert.is_true(vim.tbl_contains(out, '    print(1)'))
+    assert.is_true(vim.tbl_contains(out, ': 1'))
+  end)
+
+  it('omits the indented code when show_code is false (:exports results)', function()
+    local doc = { footnotes = {}, options = {}, blocks = { { type = 'src', lang = 'lua', body = { 'print(1)' }, results = { '1' }, show_code = false } } }
+    local out = ascii.render(doc)
+    assert.is_false(vim.tbl_contains(out, '    print(1)'))
+    assert.is_true(vim.tbl_contains(out, ': 1'))
   end)
 
   it('prefixes an example block body with ": "', function()

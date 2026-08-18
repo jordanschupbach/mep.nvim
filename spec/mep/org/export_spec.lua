@@ -5,6 +5,9 @@ local TODO = { 'TODO', 'DONE' }
 local function parse(lines, opts)
   opts = opts or {}
   opts.todo_keywords = opts.todo_keywords or TODO
+  if opts.eval == nil then
+    opts.eval = false -- most of these tests parse structure only; babel execution is covered separately
+  end
   return export.parse_lines(lines, opts)
 end
 
@@ -162,6 +165,118 @@ describe('mep.org.export', function()
     it('drops a comment block entirely', function()
       local doc = parse({ 'before', '#+BEGIN_COMMENT', 'secret', '#+END_COMMENT', 'after' })
       assert.are.equal(2, #doc.blocks)
+    end)
+  end)
+
+  describe('parse_lines: babel execution during export', function()
+    local orig_jobstart, orig_executable, orig_notify
+    local jobstart_calls, notifications
+
+    before_each(function()
+      orig_jobstart = vim.fn.jobstart
+      orig_executable = vim.fn.executable
+      orig_notify = vim.notify
+      jobstart_calls = {}
+      notifications = {}
+      vim.notify = function(msg, level)
+        table.insert(notifications, { msg = msg, level = level })
+      end
+      vim.fn.executable = function(name)
+        return name == 'lua' and 1 or 0
+      end
+      -- Resolves synchronously (calls on_stdout/on_exit before returning),
+      -- so mep.org.babel.run_sync's own vim.wait loop sees the result
+      -- already in hand on its very first check — no real subprocess or
+      -- real waiting involved, matching spec/README.md's mocking
+      -- convention for anything that touches vim.fn.jobstart.
+      vim.fn.jobstart = function(cmd, jobstart_opts)
+        table.insert(jobstart_calls, cmd)
+        jobstart_opts.on_stdout(1, { '42', '' })
+        jobstart_opts.on_exit(1, 0)
+        return 1
+      end
+    end)
+
+    after_each(function()
+      vim.fn.jobstart = orig_jobstart
+      vim.fn.executable = orig_executable
+      vim.notify = orig_notify
+    end)
+
+    it('runs a src block and attaches its output as results, with no :exports at all', function()
+      local doc = export.parse_lines({ '#+begin_src lua', 'print(42)', '#+end_src' }, { eval = true })
+      assert.are.equal(1, #jobstart_calls)
+      assert.is_true(doc.blocks[1].show_code)
+      assert.are.same({ '42' }, doc.blocks[1].results)
+    end)
+
+    it(':exports code shows only the code, without executing', function()
+      local doc = export.parse_lines({ '#+begin_src lua :exports code', 'print(42)', '#+end_src' }, { eval = true })
+      assert.are.equal(0, #jobstart_calls)
+      assert.is_true(doc.blocks[1].show_code)
+      assert.is_nil(doc.blocks[1].results)
+    end)
+
+    it(':exports none drops the block from the export entirely', function()
+      local doc = export.parse_lines({ '#+begin_src lua :exports none', 'print(42)', '#+end_src' }, { eval = true })
+      assert.are.equal(0, #jobstart_calls)
+      assert.are.equal(0, #doc.blocks)
+    end)
+
+    it(':exports results shows only the output, hiding the code', function()
+      local doc = export.parse_lines({ '#+begin_src lua :exports results', 'print(42)', '#+end_src' }, { eval = true })
+      assert.is_false(doc.blocks[1].show_code)
+      assert.are.same({ '42' }, doc.blocks[1].results)
+    end)
+
+    it(':eval never skips execution', function()
+      local doc = export.parse_lines({ '#+begin_src lua :eval never', 'print(42)', '#+end_src' }, { eval = true })
+      assert.are.equal(0, #jobstart_calls)
+      assert.is_nil(doc.blocks[1].results)
+    end)
+
+    it(':eval no-export skips execution during export', function()
+      local doc = export.parse_lines({ '#+begin_src lua :eval no-export', 'print(42)', '#+end_src' }, { eval = true })
+      assert.are.equal(0, #jobstart_calls)
+      assert.is_nil(doc.blocks[1].results)
+    end)
+
+    it('opts.eval == false disables babel execution for the whole parse', function()
+      local doc = export.parse_lines({ '#+begin_src lua', 'print(42)', '#+end_src' }, { eval = false })
+      assert.are.equal(0, #jobstart_calls)
+      assert.is_nil(doc.blocks[1].results)
+    end)
+
+    it('warns and leaves results nil for an unsupported language', function()
+      local doc = export.parse_lines({ '#+begin_src cobol', 'x', '#+end_src' }, { eval = true })
+      assert.is_nil(doc.blocks[1].results)
+      assert.are.equal(1, #notifications)
+      assert.matches('unsupported babel language', notifications[1].msg)
+    end)
+
+    it('still attaches captured stdout and warns on a nonzero exit code', function()
+      vim.fn.jobstart = function(cmd, jobstart_opts)
+        table.insert(jobstart_calls, cmd)
+        jobstart_opts.on_stderr(1, { 'boom', '' })
+        jobstart_opts.on_exit(1, 1)
+        return 1
+      end
+      local doc = export.parse_lines({ '#+begin_src lua', 'error("boom")', '#+end_src' }, { eval = true })
+      assert.are.same({}, doc.blocks[1].results)
+      assert.are.equal(1, #notifications)
+      assert.matches('export babel execution failed', notifications[1].msg)
+      assert.matches('boom', notifications[1].msg)
+    end)
+
+    it(':cache yes reuses mep.org.babel.results_cache across parses, skipping the re-run', function()
+      local babel = require('mep.org.babel')
+      babel.results_cache = {}
+      local lines = { '#+begin_src lua :cache yes', 'print(42)', '#+end_src' }
+      export.parse_lines(lines, { eval = true })
+      assert.are.equal(1, #jobstart_calls)
+      export.parse_lines(lines, { eval = true })
+      assert.are.equal(1, #jobstart_calls)
+      babel.results_cache = {}
     end)
   end)
 

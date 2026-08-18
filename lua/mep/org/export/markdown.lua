@@ -123,10 +123,18 @@ function M.render(doc)
       end
       out[#out + 1] = string.rep('  ', b.depth) .. marker .. render_inline(b.text)
     elseif b.type == 'src' then
-      blank()
-      out[#out + 1] = '```' .. (b.lang or '')
-      vim.list_extend(out, b.body)
-      out[#out + 1] = '```'
+      if b.show_code then
+        blank()
+        out[#out + 1] = '```' .. (b.lang or '')
+        vim.list_extend(out, b.body)
+        out[#out + 1] = '```'
+      end
+      if b.results and #b.results > 0 then
+        blank()
+        out[#out + 1] = '```'
+        vim.list_extend(out, b.results)
+        out[#out + 1] = '```'
+      end
     elseif b.type == 'block' then
       blank()
       if b.kind == 'quote' then

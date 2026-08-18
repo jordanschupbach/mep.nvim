@@ -1,8 +1,13 @@
 local export = require('mep.org.export')
 local html = require('mep.org.export.html')
 
-local function render(lines)
-  local doc = export.parse_lines(lines, { todo_keywords = { 'TODO', 'DONE' } })
+local function render(lines, opts)
+  opts = opts or {}
+  opts.todo_keywords = opts.todo_keywords or { 'TODO', 'DONE' }
+  if opts.eval == nil then
+    opts.eval = false -- these tests check rendering shape, not babel execution
+  end
+  local doc = export.parse_lines(lines, opts)
   return html.render(doc)
 end
 
@@ -33,6 +38,20 @@ describe('mep.org.export.html', function()
   it('renders a src block with a language class', function()
     local text = joined({ '#+begin_src lua', 'print(1)', '#+end_src' })
     assert.is_not_nil(text:find('<pre><code class="language-lua">print(1)</code></pre>', 1, true))
+  end)
+
+  it('renders babel results in their own <pre> right after the code', function()
+    local doc = { footnotes = {}, options = {}, blocks = { { type = 'src', lang = 'lua', body = { 'print(1)' }, results = { '1' }, show_code = true } } }
+    local out = table.concat(html.render(doc), '\n')
+    assert.is_not_nil(out:find('<pre><code class="language-lua">print(1)</code></pre>', 1, true))
+    assert.is_not_nil(out:find('<pre class="results">1</pre>', 1, true))
+  end)
+
+  it('omits the code <pre> when show_code is false (:exports results)', function()
+    local doc = { footnotes = {}, options = {}, blocks = { { type = 'src', lang = 'lua', body = { 'print(1)' }, results = { '1' }, show_code = false } } }
+    local out = table.concat(html.render(doc), '\n')
+    assert.is_nil(out:find('<code', 1, true))
+    assert.is_not_nil(out:find('<pre class="results">1</pre>', 1, true))
   end)
 
   it('renders a flat unordered list', function()

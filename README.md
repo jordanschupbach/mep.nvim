@@ -772,6 +772,7 @@ Five ready-made pickers, each its own source module under
 |---------------------|-----------------------------------|------------------------------------------------|
 | `:MepFindFiles`     | `require('mep.picker').find_files()`   | Project files (`rg --files`, or a pure-Lua walk if `rg` isn't installed) |
 | `:MepLiveGrep`      | `require('mep.picker').live_grep()`    | File contents across the project, via `rg` (required) |
+| `:MepProjectSearch` | `require('mep.picker').live_grep()`    | Alias of `:MepLiveGrep`, for a `<leader>p*`-mnemonic keymap |
 | `:MepBufferSearch`  | `require('mep.picker').buffer_search()`| Lines of the current buffer                     |
 | `:MepBuffers`       | `require('mep.picker').buffers()`      | Open (listed, loaded) buffers, most recently used first |
 | `:MepCommands`      | `require('mep.picker').commands()`     | User-defined Ex commands (buffer-local + global, `:Mep*` included) |
@@ -1242,7 +1243,20 @@ structure editing below works immediately, even before (or without) the
   just the subtree at point, honoring a `:EXPORT_TITLE:` property
   override and renormalizing descendant levels so the first child
   becomes level 1 (matching real org-mode's own subtree-export
-  behavior). Three backends:
+  behavior). Every `src` block is executed during export (via
+  `mep.org.babel.run_sync`, blocking synchronously — the same
+  compile-then-run/interpreter dispatch `mep.org.babel.execute` uses
+  interactively, just with no live buffer to write into) and its output
+  embedded right after the code, unless `:exports code`/`none` narrows
+  what's shown, `:eval never`/`no-export` opts the block itself out, or
+  `opts.eval = false` disables it for the whole export; `:exports
+  results` shows only the output, and `:exports none` drops the block
+  entirely. This is a deliberate deviation from real org-babel's own
+  default `:exports` value (`"code"` — nothing run/shown unless a block
+  opts in with `:exports both`/`results`); a `:cache yes` block reuses
+  `mep.org.babel.results_cache` under the same key `M.execute`'s own
+  `<C-c>e` would use, so exporting right after a manual run hits the
+  cache instead of re-running. Three backends:
   - **`mep.org.export.ascii`** — plain text; emphasis markers are left
     as literal characters (`*bold*` stays `*bold*`, matching real
     org-mode's own ascii backend), since plain text has no other way to
@@ -2637,6 +2651,7 @@ vim.keymap.set('n', '<leader>bs', '<cmd>MepScratch<cr>')
 vim.keymap.set('n', '<leader>fg', '<cmd>MepLiveGrep<cr>')
 vim.keymap.set('n', '<leader>fb', '<cmd>MepBufferSearch<cr>')
 vim.keymap.set('n', '<leader>po', '<cmd>MepProjects<cr>')
+vim.keymap.set('n', '<leader>pr', '<cmd>MepProjectSearch<cr>')
 ```
 
 ## Building your own picker

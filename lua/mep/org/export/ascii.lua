@@ -128,9 +128,17 @@ function M.render(doc)
       end
       out[#out + 1] = string.rep('  ', b.depth) .. marker .. render_inline(b.text)
     elseif b.type == 'src' then
-      blank()
-      for _, l in ipairs(b.body) do
-        out[#out + 1] = '    ' .. l
+      if b.show_code then
+        blank()
+        for _, l in ipairs(b.body) do
+          out[#out + 1] = '    ' .. l
+        end
+      end
+      if b.results and #b.results > 0 then
+        blank()
+        for _, l in ipairs(b.results) do
+          out[#out + 1] = ': ' .. l
+        end
       end
     elseif b.type == 'block' then
       blank()
