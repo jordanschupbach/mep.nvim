@@ -152,10 +152,53 @@ M.registry = {
     filetypes = { 'ocaml' },
     root_markers = { 'dune-project', '.git' },
   },
+  -- `handlers['window/showMessageRequest']` overrides serve-d's own
+  -- built-in DCD version check (`doGlobalStartup` in its own `extension.
+  -- d`, confirmed against its source) — it unconditionally compares
+  -- whatever `dcd-client`/`dcd-server` it finds (or doesn't find at all)
+  -- against a version number hardcoded into that specific serve-d
+  -- release, and interrupts with a real `showMessageRequest` popup
+  -- ("DCD is outdated...", offering to download/compile a new one) the
+  -- moment its client starts — every session, completely independent of
+  -- `d.enableAutoComplete`/`d.aggressiveUpdate` (neither gates this
+  -- specific startup check, only what happens *after* the user answers
+  -- it). There's no actual server-side setting that skips it. On a
+  -- Nix-managed machine specifically this is worse than a one-off
+  -- annoyance: `dcd-client`/`dcd-server` (if present at all) come from
+  -- the Nix store, read-only and version-pinned by the flake, not
+  -- something serve-d's own auto-updater could ever actually replace —
+  -- so every single answer to that prompt is wrong for this setup, not
+  -- just inconvenient. Silently declining leaves DCD-backed completion
+  -- off for the session, same as manually clicking "Continue anyway"
+  -- would — every other component (dscanner diagnostics, dfmt
+  -- formatting, hover, ...) still works. Any other `showMessageRequest`
+  -- this client sends still goes to Neovim's own default handler,
+  -- unaffected.
+  --
+  -- Returns `vim.NIL`, not bare Lua `nil` — this handler's return value
+  -- becomes the literal JSON-RPC *response* sent back to the server (a
+  -- client-side `handlers` entry is dispatched directly, unlike the
+  -- global `vim.lsp.handlers` table, which Neovim's own runtime wraps
+  -- with boilerplate that tolerates a bare `nil`). Confirmed empirically:
+  -- returning plain `nil` throws `method "window/showMessageRequest":
+  -- either a result or an error must be sent to the server in response`
+  -- from `vim.lsp.rpc`'s own dispatcher, since a Lua `nil` result is
+  -- indistinguishable there from "no response at all" — `vim.NIL` is
+  -- Neovim's own sentinel for a real, present JSON `null`, which is what
+  -- "user dismissed the dialog, chose nothing" actually serializes to
+  -- over LSP.
   serve_d = {
     cmd = { 'serve-d' },
     filetypes = { 'd' },
     root_markers = { 'dub.json', 'dub.sdl', '.git' },
+    handlers = {
+      ['window/showMessageRequest'] = function(err, result, ctx, config)
+        if result and result.message and result.message:find('DCD is outdated', 1, true) then
+          return vim.NIL
+        end
+        return vim.lsp.handlers['window/showMessageRequest'](err, result, ctx, config)
+      end,
+    },
   },
   ruby_lsp = {
     cmd = { 'ruby-lsp' },

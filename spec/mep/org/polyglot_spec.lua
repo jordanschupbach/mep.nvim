@@ -355,6 +355,74 @@ describe('mep.org.polyglot', function()
     end)
   end)
 
+  describe('per-block shadow buffers (java)', function()
+    it("names a java block's shadow file after its own public class, not a generic 'shadow'", function()
+      local bufnr = buf({
+        '#+begin_src java',
+        'public class HelloWorld {',
+        '  public static void main(String[] args) {}',
+        '}',
+        '#+end_src',
+      })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local ctx = polyglot.context_at_cursor(bufnr, 2)
+
+      assert.matches('/HelloWorld%.java$', vim.api.nvim_buf_get_name(ctx.shadow_bufnr))
+    end)
+
+    it('prefers an explicit :classname header arg over scanning the body', function()
+      local bufnr = buf({
+        '#+begin_src java :classname Other',
+        'public class HelloWorld {',
+        '  public static void main(String[] args) {}',
+        '}',
+        '#+end_src',
+      })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local ctx = polyglot.context_at_cursor(bufnr, 2)
+
+      assert.matches('/Other%.java$', vim.api.nvim_buf_get_name(ctx.shadow_bufnr))
+    end)
+
+    it('gives two java blocks with different public classes two distinct, correctly named shadow buffers', function()
+      local bufnr = buf({
+        '#+begin_src java',
+        'public class Foo {}',
+        '#+end_src',
+        '#+begin_src java',
+        'public class Bar {}',
+        '#+end_src',
+      })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local ctx1 = polyglot.context_at_cursor(bufnr, 2)
+      local ctx2 = polyglot.context_at_cursor(bufnr, 5)
+
+      assert.are_not.equal(ctx1.shadow_bufnr, ctx2.shadow_bufnr)
+      assert.matches('/Foo%.java$', vim.api.nvim_buf_get_name(ctx1.shadow_bufnr))
+      assert.matches('/Bar%.java$', vim.api.nvim_buf_get_name(ctx2.shadow_bufnr))
+    end)
+
+    it("falls back to 'Main.java' for a bare-statement block with no public class, matching wrap_java_main's own synthetic class name", function()
+      local bufnr = buf({
+        '#+begin_src java',
+        'System.out.println("hi");',
+        '#+end_src',
+      })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local ctx = polyglot.context_at_cursor(bufnr, 2)
+
+      assert.matches('/Main%.java$', vim.api.nvim_buf_get_name(ctx.shadow_bufnr))
+    end)
+
+    it('places java scaffolding under stdpath("cache"), same as c/cpp', function()
+      local bufnr = buf({ '#+begin_src java', 'public class X {}', '#+end_src' })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local ctx = polyglot.context_at_cursor(bufnr, 2)
+      local path = vim.api.nvim_buf_get_name(ctx.shadow_bufnr)
+      assert.is_not_nil(path:find(cache_dir, 1, true))
+    end)
+  end)
+
   describe('on_block_executed', function()
     local orig_executable, orig_get_clients
 
@@ -569,6 +637,22 @@ describe('mep.org.polyglot', function()
       assert.has_no.errors(function()
         polyglot.on_block_executed(bufnr, 2)
       end)
+    end)
+
+    it('is a no-op for java too, despite java also getting a per-block shadow buffer', function()
+      -- java is a PER_BLOCK_LANGS member (see its own comment: purely for
+      -- shadow buffer *naming*, one file per public class), but not a
+      -- COMPILE_DB_LANGS one — no compile_commands.json/clangd-restart
+      -- dance applies to it at all.
+      local bufnr = buf({ '#+begin_src java', 'public class X {}', '#+end_src' })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local ctx = polyglot.context_at_cursor(bufnr, 2)
+      local dir = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(ctx.shadow_bufnr), ':h')
+
+      assert.has_no.errors(function()
+        polyglot.on_block_executed(bufnr, 2)
+      end)
+      assert.are.equal(0, vim.fn.filereadable(dir .. '/compile_commands.json'))
     end)
 
     it('is a no-op when polyglot was never set up for this buffer', function()

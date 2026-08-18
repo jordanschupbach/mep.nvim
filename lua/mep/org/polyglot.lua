@@ -30,8 +30,8 @@
 --- the shadow buffer's text current automatically, the same as any real
 --- edited buffer, whenever `sync` rewrites its lines.
 ---
---- A given language's shadow buffer (for `PER_BLOCK_LANGS` — c/cpp, see
---- its own comment — one per *block* rather than one shared per language)
+--- A given language's shadow buffer (for `PER_BLOCK_LANGS` — c/cpp/java,
+--- see its own comment — one per *block* rather than one shared per language)
 --- is only ever created the first time the cursor actually lands inside
 --- one of its blocks (`context_at_cursor` creates it lazily on demand) —
 --- *not* proactively for every language `sync` sees in the buffer. Since
@@ -169,15 +169,60 @@ local ENTRY_WRAPPERS = {
 }
 
 --- Languages that get one shadow buffer PER SRC BLOCK instead of one
---- shared shadow buffer for the whole org file: each c/cpp block is its
---- own independent translation unit that may want its own compile flags
---- (a `compile_commands.json` entry naming *that block's own* shadow
---- file — see `M.on_block_executed`), which a single shared shadow buffer
---- covering every c/cpp block in the file couldn't give correctly even in
---- principle (clangd's flags are per-file, not per-line-range). This is
---- also what lifts `ENTRY_WRAPPERS`' own "only one `:main yes` block per
---- language" limitation for c/cpp specifically (see its own comment).
-local PER_BLOCK_LANGS = { c = true, cpp = true }
+--- shared shadow buffer for the whole org file:
+---  - c/cpp: each block is its own independent translation unit that may
+---    want its own compile flags (a `compile_commands.json` entry naming
+---    *that block's own* shadow file — see `M.on_block_executed`), which
+---    a single shared shadow buffer covering every c/cpp block in the
+---    file couldn't give correctly even in principle (clangd's flags are
+---    per-file, not per-line-range). This is also what lifts
+---    `ENTRY_WRAPPERS`' own "only one `:main yes` block per language"
+---    limitation for c/cpp specifically (see its own comment).
+---  - java: real Java (and jdt-ls, enforcing the same rule javac does)
+---    requires a `public class X` to live in a file literally named
+---    `X.java` — two java blocks with different public class names could
+---    never both be satisfied by one shared `shadow.java`, and even a
+---    single block needs its own correctly-named file, not a generic one
+---    (see `shadow_basename`). Only the *filename* piece of the c/cpp
+---    reasoning above applies to java, not `compile_commands.json`/
+---    clangd — `M.on_block_executed` has its own, narrower
+---    `COMPILE_DB_LANGS` for that.
+local PER_BLOCK_LANGS = { c = true, cpp = true, java = true }
+
+--- `PER_BLOCK_LANGS` members needing `M.on_block_executed`'s own
+--- `compile_commands.json`-regeneration-and-client-restart dance — just
+--- c/cpp (clangd-specific machinery start to finish); `java`'s own
+--- `PER_BLOCK_LANGS` membership is purely about shadow buffer *naming*
+--- (see `PER_BLOCK_LANGS`' own comment), nothing to redo once a block's
+--- actually been run.
+local COMPILE_DB_LANGS = { c = true, cpp = true }
+
+--- The basename (no extension) a `ft` shadow buffer should use — `X` for
+--- java's `X.java` (jdt-ls, like `javac`, requires a `public class X` to
+--- live in a file named exactly that; see `PER_BLOCK_LANGS`' own comment
+--- on why java is one of these but c/cpp don't need this at all), a
+--- fixed `'shadow'` for everything else. An explicit `:classname` header
+--- arg wins if given, otherwise scans the block's own body the same way
+--- `mep.org.babel.execute`'s own `compile_cmd` does before invoking
+--- `javac` (`babel.languages.java.detect_class`, an alias for that
+--- module's own `java_class_name`) — reusing it here, rather than
+--- re-implementing the same regex, is what keeps the shadow file's name
+--- and whatever `execute` actually compiles the block under in agreement
+--- for the same block. `detect_class` itself never actually returns nil
+--- (it falls back to `'Main'` when neither a `public class` nor a bare
+--- `class` declaration is found at all — matching `wrap_java_main`'s own
+--- synthetic entry-point class name for a bare-statement, `:main yes`/
+--- self-contained-default block with no class of its own) — this
+--- function's trailing `or 'shadow'` only exists for the hypothetical
+--- case of a future `detect_class` that does return a falsy value.
+local function shadow_basename(ft, block)
+  if ft ~= 'java' then
+    return 'shadow'
+  end
+  local hargs = babel.parse_header_args(block.args)
+  local detect_class = babel.languages.java.detect_class
+  return hargs.classname or (detect_class and detect_class(block.body)) or 'shadow'
+end
 
 --- The 1-based ordinal of `target_block` among every `target_ft` block in
 --- `bufnr`, in document order — `PER_BLOCK_LANGS`' own block_key (used
@@ -279,10 +324,12 @@ end
 --- `per_block_shadow_path`: like `shadow_path`, but one directory per
 --- block (keyed by its `block_ordinal`, stable across the line-number
 --- shifts `block_ordinal`'s own comment explains) rather than one shared
---- directory for the whole language — `PER_BLOCK_LANGS` only.
-local function per_block_shadow_path(root, ft, ext, ordinal)
+--- directory for the whole language — `PER_BLOCK_LANGS` only. `basename`
+--- is `shadow_basename`'s own result — `'shadow'` for c/cpp, a real
+--- detected/`:classname`-given class name for java.
+local function per_block_shadow_path(root, ft, ext, ordinal, basename)
   local dir = string.format('%s/%s/block_%d', root, ft, ordinal)
-  return dir, dir .. '/shadow' .. ext
+  return dir, dir .. '/' .. basename .. ext
 end
 
 --- ft -> function(shadow_basename) -> `{ filename, lines }` | nil: a
@@ -421,7 +468,8 @@ local function get_or_create_shadow(org_bufnr, raw_lang, block)
     if entry and vim.api.nvim_buf_is_valid(entry.bufnr) then
       return entry.bufnr
     end
-    local dir, path = per_block_shadow_path(st.cache_root, ft, lang.to_extension(raw_lang), ordinal)
+    local dir, path =
+      per_block_shadow_path(st.cache_root, ft, lang.to_extension(raw_lang), ordinal, shadow_basename(ft, block))
     pcall(vim.fn.mkdir, dir, 'p')
     local shadow = new_shadow_buffer(org_bufnr, path, ft)
     st.shadow[ft][block_key] = { bufnr = shadow, dir = dir, path = path }
@@ -584,7 +632,7 @@ end
 
 --- Called after `mep.org.babel.execute` finishes running the src block at
 --- `lnum` (wired from `mep.org.org`'s own babel-execute keymaps). For
---- `PER_BLOCK_LANGS` (c/cpp), regenerates that block's own `compile_
+--- `COMPILE_DB_LANGS` (c/cpp), regenerates that block's own `compile_
 --- commands.json` to match exactly what babel just compiled (same
 --- compiler `mep.org.babel.execute` itself resolves, via `babel.
 --- resolve_executable`, plus `forced_include_args` above for a wrapped
@@ -600,7 +648,7 @@ end
 --- with `gd`/references left permanently broken. A brand new process, on
 --- its own very first lookup for that directory, has no such stale cache
 --- to invalidate at all. A no-op if polyglot isn't set up for `bufnr`,
---- the block at `lnum` isn't found, its language isn't `PER_BLOCK_LANGS`,
+--- the block at `lnum` isn't found, its language isn't `COMPILE_DB_LANGS`,
 --- its shadow was never created (cursor never visited it — nothing to
 --- attach flags to yet), or no compiler was resolved (mirrors `M.
 --- execute`'s own graceful-miss). Deliberately runs regardless of the
@@ -616,7 +664,7 @@ function M.on_block_executed(bufnr, lnum)
     return
   end
   local ft = lang.to_filetype(block.lang)
-  if not ft or not PER_BLOCK_LANGS[ft] then
+  if not ft or not COMPILE_DB_LANGS[ft] then
     return
   end
   local entry = st.shadow[ft] and st.shadow[ft][tostring(block_ordinal(bufnr, ft, block))]

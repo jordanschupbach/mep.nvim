@@ -26,6 +26,37 @@ describe('mep.lsp.servers', function()
     end)
   end)
 
+  describe('serve_d', function()
+    local handler
+
+    before_each(function()
+      handler = servers.registry.serve_d.handlers['window/showMessageRequest']
+    end)
+
+    it('silently declines a DCD-outdated message request instead of prompting', function()
+      local result = handler(nil, { message = 'DCD is outdated. (target=1.2.3, installed=none)', actions = {} }, {}, {})
+      -- vim.NIL, not Lua nil: this return value becomes the literal
+      -- JSON-RPC response sent to the server, and a bare nil there means
+      -- "no response at all" to vim.lsp.rpc's own dispatcher, not "null".
+      assert.are.equal(vim.NIL, result)
+    end)
+
+    it('still forwards any other message request to the default handler', function()
+      local orig = vim.lsp.handlers['window/showMessageRequest']
+      local received
+      vim.lsp.handlers['window/showMessageRequest'] = function(_, result)
+        received = result
+        return 'forwarded'
+      end
+
+      local ret = handler(nil, { message = 'Some other prompt' }, {}, {})
+
+      vim.lsp.handlers['window/showMessageRequest'] = orig
+      assert.are.equal('Some other prompt', received.message)
+      assert.are.equal('forwarded', ret)
+    end)
+  end)
+
   describe('names', function()
     it('returns every registry key, sorted', function()
       local names = servers.names()

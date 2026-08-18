@@ -211,8 +211,16 @@ print("Hello, world")
 * Zig Example
 
 #+name: Hello, world in Zig
-#+BEGIN_SRC zig :main yes :results output
-try stdout.writeAll("Hello, world\n");
+#+BEGIN_SRC zig :results output
+const std = @import("std");
+
+pub fn main(init: std.process.Init) !void {
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
+    const stdout = &stdout_writer.interface;
+    try stdout.writeAll("Hello, world\n");
+    try stdout.flush();
+}
 #+END_SRC
 #+RESULTS:
 : Hello, world
@@ -238,7 +246,7 @@ puts "Hello, world"
 * Java Example
 
 #+name: Hello, world in Java
-#+BEGIN_SRC java yes :classname HelloWorld :results output
+#+BEGIN_SRC java :classname HelloWorld :results output
 public class HelloWorld {
     public static void main(String[] args) {
         System.out.println("Hello, World!");
