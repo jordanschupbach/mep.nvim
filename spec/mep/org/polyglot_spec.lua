@@ -300,6 +300,38 @@ describe('mep.org.polyglot', function()
       assert.are.same({ '', 'int a = 2;', '' }, vim.api.nvim_buf_get_lines(ctx.shadow_bufnr, 0, -1, false))
     end)
 
+    it('keeps a later block correctly matched to its own shadow after an earlier block\'s #+RESULTS: insertion shifts its line number', function()
+      -- mep.org.babel.execute inserts a #+RESULTS: block right after the
+      -- block it ran, shifting every line number below it — block_key
+      -- used to be the block's own start_lnum, which this silently
+      -- invalidated for any later block once an earlier one had already
+      -- run (confirmed the hard way: M.sync could no longer find the
+      -- entry it created under the old line number, so the shadow buffer
+      -- for the later block would go blank). block_ordinal (position
+      -- among same-language blocks, not line number) survives this.
+      local bufnr = buf({
+        '#+begin_src cpp',
+        'int a = 1;',
+        '#+end_src',
+        '#+begin_src cpp',
+        'int b = 2;',
+        '#+end_src',
+      })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      polyglot.context_at_cursor(bufnr, 2)
+      local ctx2 = polyglot.context_at_cursor(bufnr, 5)
+
+      -- simulate babel.execute inserting a #+RESULTS: block after block 1
+      -- (originally lines 1-3): block 2's own start_lnum shifts from 4 to 7
+      vim.api.nvim_buf_set_lines(bufnr, 3, 3, false, { '#+RESULTS:', ': 1', '' })
+      polyglot.sync(bufnr)
+
+      assert.are.same(
+        { '', '', '', '', '', '', '', 'int b = 2;', '' },
+        vim.api.nvim_buf_get_lines(ctx2.shadow_bufnr, 0, -1, false)
+      )
+    end)
+
     it('deletes every per-block shadow buffer and the cache scaffold root on teardown', function()
       local bufnr = buf({
         '#+begin_src cpp',
@@ -324,28 +356,22 @@ describe('mep.org.polyglot', function()
   end)
 
   describe('on_block_executed', function()
-    local orig_executable, orig_get_clients, orig_detach, orig_attach
+    local orig_executable, orig_get_clients
 
     before_each(function()
       orig_executable = vim.fn.executable
       orig_get_clients = vim.lsp.get_clients
-      orig_detach = vim.lsp.buf_detach_client
-      orig_attach = vim.lsp.buf_attach_client
       vim.fn.executable = function(name)
         return (name == 'g++' or name == 'gcc') and 1 or 0
       end
       vim.lsp.get_clients = function()
         return {}
       end
-      vim.lsp.buf_detach_client = function() end
-      vim.lsp.buf_attach_client = function() end
     end)
 
     after_each(function()
       vim.fn.executable = orig_executable
       vim.lsp.get_clients = orig_get_clients
-      vim.lsp.buf_detach_client = orig_detach
-      vim.lsp.buf_attach_client = orig_attach
     end)
 
     it('writes a compile_commands.json entry matching the real compile invocation', function()
@@ -411,58 +437,119 @@ describe('mep.org.polyglot', function()
       assert.are.same({ 'g++', '-c', shadow_path }, decoded[1].arguments)
     end)
 
-    it('notifies every client attached to the block shadow buffer via workspace/didChangeWatchedFiles', function()
-      local bufnr = buf({ '#+begin_src cpp', 'int a = 1;', '#+end_src' })
+    it('still writes the right block\'s compile_commands.json after an earlier block\'s #+RESULTS: insertion has shifted its line number', function()
+      local bufnr = buf({
+        '#+begin_src cpp',
+        'int a = 1;',
+        '#+end_src',
+        '#+begin_src cpp',
+        'int b = 2;',
+        '#+end_src',
+      })
       polyglot.setup_buffer(bufnr, { keymaps = {} })
-      local ctx = polyglot.context_at_cursor(bufnr, 2)
-      local shadow_path = vim.api.nvim_buf_get_name(ctx.shadow_bufnr)
-      local dir = vim.fn.fnamemodify(shadow_path, ':h')
+      polyglot.context_at_cursor(bufnr, 2)
+      local ctx2 = polyglot.context_at_cursor(bufnr, 5)
+      local shadow_path2 = vim.api.nvim_buf_get_name(ctx2.shadow_bufnr)
+      local dir2 = vim.fn.fnamemodify(shadow_path2, ':h')
 
-      local notified
-      vim.lsp.get_clients = function(opts)
-        assert.are.equal(ctx.shadow_bufnr, opts.bufnr)
-        return {
-          {
-            id = 7,
-            notify = function(_, method, params)
-              notified = { method = method, params = params }
-            end,
-          },
-        }
-      end
+      -- simulate babel.execute having already run block 1 and inserted
+      -- its own #+RESULTS: — block 2's own start_lnum shifts from 4 to 7
+      vim.api.nvim_buf_set_lines(bufnr, 3, 3, false, { '#+RESULTS:', ': 1', '' })
 
-      polyglot.on_block_executed(bufnr, 2)
+      polyglot.on_block_executed(bufnr, 8) -- cursor now inside block 2's (shifted) body
 
-      assert.is_not_nil(notified)
-      assert.are.equal('workspace/didChangeWatchedFiles', notified.method)
-      assert.are.equal(vim.uri_from_fname(dir .. '/compile_commands.json'), notified.params.changes[1].uri)
-      assert.are.equal(2, notified.params.changes[1].type)
+      local decoded = vim.json.decode(table.concat(vim.fn.readfile(dir2 .. '/compile_commands.json'), '\n'))
+      assert.are.same({ 'g++', '-c', shadow_path2 }, decoded[1].arguments)
     end)
 
-    it('forces a real reparse via detach+reattach, not just the didChangeWatchedFiles notification', function()
-      -- didChangeWatchedFiles alone doesn't make clangd re-derive compile
-      -- flags for an already-open document (confirmed empirically against
-      -- a real clangd — see this function's own comment); the
-      -- detach/reattach cycle is what actually forces the reparse.
+    it('stops the attached client and re-fires FileType once it detaches, so a fresh client picks up the new compile_commands.json', function()
+      -- Neither `workspace/didChangeWatchedFiles` nor a same-process
+      -- document close+reopen reliably makes an *already-running* clangd
+      -- re-scan a directory it already cached as having no compilation
+      -- database (confirmed empirically against a real clangd) — only a
+      -- genuine fresh process, on its own first-ever lookup, does.
       local bufnr = buf({ '#+begin_src cpp', 'int a = 1;', '#+end_src' })
       polyglot.setup_buffer(bufnr, { keymaps = {} })
       local ctx = polyglot.context_at_cursor(bufnr, 2)
 
-      vim.lsp.get_clients = function()
-        return { { id = 7, notify = function() end } }
+      local stopped
+      local fake_client = {
+        id = 7,
+        attached_buffers = { [ctx.shadow_bufnr] = true },
+        stop = function(self, force)
+          stopped = { self = self, force = force }
+        end,
+      }
+      vim.lsp.get_clients = function(opts)
+        assert.are.equal(ctx.shadow_bufnr, opts.bufnr)
+        return { fake_client }
       end
-      local detach_calls, attach_calls = {}, {}
-      vim.lsp.buf_detach_client = function(bufnr_arg, client_id)
-        table.insert(detach_calls, { bufnr = bufnr_arg, client_id = client_id })
-      end
-      vim.lsp.buf_attach_client = function(bufnr_arg, client_id)
-        table.insert(attach_calls, { bufnr = bufnr_arg, client_id = client_id })
-      end
+
+      local filetype_refired = false
+      vim.api.nvim_create_autocmd('FileType', {
+        buffer = ctx.shadow_bufnr,
+        once = true,
+        callback = function()
+          filetype_refired = true
+        end,
+      })
 
       polyglot.on_block_executed(bufnr, 2)
+      assert.is_not_nil(stopped)
+      assert.is_true(stopped.force)
+      assert.is_false(filetype_refired) -- not yet — only once LspDetach actually confirms it's gone
 
-      assert.are.same({ { bufnr = ctx.shadow_bufnr, client_id = 7 } }, detach_calls)
-      assert.are.same({ { bufnr = ctx.shadow_bufnr, client_id = 7 } }, attach_calls)
+      vim.api.nvim_exec_autocmds('LspDetach', { buffer = ctx.shadow_bufnr, data = { client_id = 7 } })
+      assert.is_true(filetype_refired)
+    end)
+
+    it('re-fires FileType for every buffer a shared client was attached to, not just the block that was just executed', function()
+      -- clangd is one shared process/client across every c/cpp shadow
+      -- buffer in the session (root_dir resolves to nil for all of them,
+      -- so vim.lsp.enable's own dedup reuses one client) — stopping it to
+      -- refresh one block's flags detaches it from every *other* block's
+      -- shadow buffer too, which would otherwise be left with no LSP
+      -- attached at all until independently torn down and recreated.
+      local bufnr = buf({
+        '#+begin_src cpp',
+        'int a = 1;',
+        '#+end_src',
+        '#+begin_src cpp',
+        'int b = 2;',
+        '#+end_src',
+      })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local ctx1 = polyglot.context_at_cursor(bufnr, 2)
+      local ctx2 = polyglot.context_at_cursor(bufnr, 5)
+
+      local fake_client = {
+        id = 9,
+        attached_buffers = { [ctx1.shadow_bufnr] = true, [ctx2.shadow_bufnr] = true },
+        stop = function() end,
+      }
+      vim.lsp.get_clients = function(opts)
+        if opts.bufnr == ctx1.shadow_bufnr then
+          return { fake_client }
+        end
+        return {}
+      end
+
+      local refired = {}
+      for _, b in ipairs({ ctx1.shadow_bufnr, ctx2.shadow_bufnr }) do
+        vim.api.nvim_create_autocmd('FileType', {
+          buffer = b,
+          once = true,
+          callback = function()
+            refired[b] = true
+          end,
+        })
+      end
+
+      polyglot.on_block_executed(bufnr, 2) -- only block 1
+      vim.api.nvim_exec_autocmds('LspDetach', { buffer = ctx1.shadow_bufnr, data = { client_id = 9 } })
+
+      assert.is_true(refired[ctx1.shadow_bufnr])
+      assert.is_true(refired[ctx2.shadow_bufnr])
     end)
 
     it('is a no-op (nothing written, no error) when the block was never visited (no shadow yet)', function()
@@ -842,6 +929,71 @@ describe('mep.org.polyglot', function()
 
       vim.lsp.buf.definition = orig
       assert.is_true(called)
+    end)
+
+    it('gd jumps to a single location result, translated back onto the org buffer', function()
+      -- Regression test: Neovim >= 0.11 dropped location-returning
+      -- methods (definition/declaration/references/implementation/
+      -- type_definition) from vim.lsp.handlers entirely, so bridge's old
+      -- "hand off to vim.lsp.handlers[method]" fallback silently did
+      -- nothing for gd — confirmed empirically against a real Neovim
+      -- (vim.lsp.handlers['textDocument/definition'] is nil) — while K
+      -- (hover, still handler-table-dispatched) kept working, which is
+      -- exactly what made this look inconsistent.
+      local bufnr = buf({ '#+begin_src lua', 'local x = 1', 'print(x)', '#+end_src' })
+      polyglot.setup_buffer(bufnr, { keymaps = { goto_definition = { 'gd' } } })
+      local ctx = polyglot.context_at_cursor(bufnr, 3)
+
+      local orig_get_clients = vim.lsp.get_clients
+      vim.lsp.get_clients = function()
+        return {
+          {
+            offset_encoding = 'utf-16',
+            request = function(_, _, _, callback)
+              callback(nil, {
+                uri = vim.uri_from_bufnr(ctx.shadow_bufnr),
+                range = { start = { line = 1, character = 6 }, ['end'] = { line = 1, character = 7 } },
+              }, { client_id = 1 }, {})
+            end,
+          },
+        }
+      end
+
+      with_win(bufnr, { 3, 6 }, function()
+        get_callback(bufnr, 'n', 'gd')()
+        assert.are.equal(bufnr, vim.api.nvim_get_current_buf())
+        assert.are.equal(2, vim.api.nvim_win_get_cursor(0)[1])
+      end)
+
+      vim.lsp.get_clients = orig_get_clients
+    end)
+
+    it('gd opens the quickfix list for multiple location results', function()
+      local bufnr = buf({ '#+begin_src lua', 'local x = 1', 'local x = 2', 'print(x)', '#+end_src' })
+      polyglot.setup_buffer(bufnr, { keymaps = { goto_definition = { 'gd' } } })
+      local ctx = polyglot.context_at_cursor(bufnr, 4)
+
+      local orig_get_clients = vim.lsp.get_clients
+      vim.lsp.get_clients = function()
+        return {
+          {
+            offset_encoding = 'utf-16',
+            request = function(_, _, _, callback)
+              callback(nil, {
+                { uri = vim.uri_from_bufnr(ctx.shadow_bufnr), range = { start = { line = 1, character = 6 }, ['end'] = { line = 1, character = 7 } } },
+                { uri = vim.uri_from_bufnr(ctx.shadow_bufnr), range = { start = { line = 2, character = 6 }, ['end'] = { line = 2, character = 7 } } },
+              }, { client_id = 1 }, {})
+            end,
+          },
+        }
+      end
+
+      with_win(bufnr, { 4, 6 }, function()
+        get_callback(bufnr, 'n', 'gd')()
+      end)
+
+      vim.lsp.get_clients = orig_get_clients
+      assert.are.equal(2, #vim.fn.getqflist())
     end)
 
     it('warns instead of erroring when inside a src block with no attached client', function()

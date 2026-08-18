@@ -1351,7 +1351,18 @@ structure editing below works immediately, even before (or without) the
     in sync with that language's block bodies, laid out at the *same
     line numbers* as the org buffer so no position translation is ever
     needed — just URI rewriting on the way back for anything that
-    returns a location. Each shadow buffer's `filetype` is set to the
+    returns a location, then jumping to it (or opening the quickfix list,
+    for more than one result) exactly the way `vim.lsp.buf.definition()`
+    itself does. That last part can't just be delegated to `vim.lsp.
+    handlers[method]` the way hover/signature-help/rename still are:
+    confirmed empirically that Neovim >= 0.11 dropped every location-
+    returning method (`textDocument/definition`/`declaration`/
+    `references`/`implementation`/`typeDefinition`) from `vim.lsp.handlers`
+    entirely, handling them directly inside `vim.lsp.buf.definition()`/etc's
+    own internals instead — `vim.lsp.handlers['textDocument/definition']`
+    is `nil` on a real modern Neovim, which used to make `gd` silently do
+    nothing at all here while `K` (hover, still handler-table-dispatched)
+    kept working fine. Each shadow buffer's `filetype` is set to the
     language's own Neovim filetype and nothing else; whatever server(s)
     `mep.lsp` (or your own LSP config) already registered via `vim.lsp.
     enable` for that filetype attach on their own, through Neovim's
@@ -1432,21 +1443,31 @@ structure editing below works immediately, even before (or without) the
     per-line-range — a single shared compile database entry couldn't
     describe several independent little programs correctly anyway), each
     c/cpp block gets its own shadow buffer *and* its own scratch directory
-    under `stdpath('cache')/mep-polyglot/<bufnr>/<c|cpp>/block_<lnum>/`
-    (an OS cache directory, deliberately not next to your project at all
-    — nothing to `.gitignore`, nothing to see in `ls`). clangd attaches
+    under `stdpath('cache')/mep-polyglot/<bufnr>/<c|cpp>/block_<ordinal>/`
+    (`<ordinal>` = that block's own position among same-language blocks in
+    the file — stable across `mep.org.babel.execute`'s own `#+RESULTS:`
+    insertions, which shift every *line number* below the block that just
+    ran; an OS cache directory, deliberately not next to your project at
+    all — nothing to `.gitignore`, nothing to see in `ls`). clangd attaches
     with no flags at all the first time you visit a block, same as always;
     only after you actually run it (`<C-c><C-c>`/`<C-c>e`) does that
     block's own `compile_commands.json` get (re)generated from the exact
-    compiler `mep.org.babel.execute` itself resolved. Not a full client
-    restart — clangd itself keeps running, still attached to every other
-    block — just that one block's own document being properly closed and
-    reopened (`vim.lsp.buf_detach_client`/`buf_attach_client`) right after
-    a `workspace/didChangeWatchedFiles` notification goes out; confirmed
-    empirically that the notification alone doesn't make clangd re-derive
-    flags and reparse an already-open document on its own — the
-    diagnostics it already computed under the old fallback flags just sit
-    there until the document is actually reopened. A `:main yes` block's
+    compiler `mep.org.babel.execute` itself resolved. This restarts the
+    attached client (`client:stop(true)`, then re-firing `FileType` — the
+    same event `vim.lsp.enable`'s own autostart listens on — once
+    `LspAttach`/`LspDetach` confirms it's actually gone): confirmed
+    empirically that neither a `workspace/didChangeWatchedFiles`
+    notification nor a plain document close+reopen makes an
+    *already-running* clangd re-scan a directory it already cached as
+    having no compilation database — a fresh process, on its own very
+    first lookup, has no such stale cache to invalidate at all. Since
+    every c/cpp block in the whole session in practice shares one clangd
+    process (`root_dir` resolves to `nil` for all of them, so `vim.lsp.
+    enable`'s own dedup reuses a single client rather than one per block),
+    restarting it re-fires `FileType` for every *other* block's shadow
+    buffer that client was attached to as well, not just the one just
+    run — otherwise they'd be left with no LSP attached at all until
+    independently closed and reopened. A `:main yes` block's
     own `:includes` also gets translated into `-include <header>`
     compiler flags in that same `compile_commands.json` entry (stripped
     of their `<>`/`""`) — the entry-point wrap's own two free lines have

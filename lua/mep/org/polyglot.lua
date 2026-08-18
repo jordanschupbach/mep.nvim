@@ -179,28 +179,58 @@ local ENTRY_WRAPPERS = {
 --- language" limitation for c/cpp specifically (see its own comment).
 local PER_BLOCK_LANGS = { c = true, cpp = true }
 
+--- The 1-based ordinal of `target_block` among every `target_ft` block in
+--- `bufnr`, in document order — `PER_BLOCK_LANGS`' own block_key (used
+--- instead of `block.start_lnum`, which shifts for every block *below*
+--- one that's just been executed: `mep.org.babel.execute` inserts a
+--- `#+RESULTS:` block right after it. Confirmed empirically that keying
+--- by `start_lnum` breaks both shadow buffer content matching (`M.sync`,
+--- which would go blank) and `compile_commands.json` generation (`M.
+--- on_block_executed`, which would silently no-op) for any *later*
+--- same-language block once an earlier one has already run — its own
+--- line number no longer matches the key its shadow entry was created
+--- under. A block's position *among same-language blocks* survives that
+--- kind of shift; its own line number doesn't.
+local function block_ordinal(bufnr, target_ft, target_block)
+  local ordinal = 0
+  for _, block in ipairs(babel.find_blocks(bufnr)) do
+    if lang.to_filetype(block.lang) == target_ft then
+      ordinal = ordinal + 1
+      if block.start_lnum == target_block.start_lnum then
+        return ordinal
+      end
+    end
+  end
+  return ordinal
+end
+
 --- Every language currently in `raw_lang`'s block(s), rebuilt as
 --- `#total_lines` lines: blank except where `bufnr`'s own src blocks in
 --- that language put real body text, at their own original line numbers.
---- `only_start_lnum`, if given, restricts this to just the one block
---- starting there — used by `PER_BLOCK_LANGS`' own per-block shadow
---- buffers, each of which should only ever show its own block's body, not
---- every other block of the same language merged in too.
-local function shadow_lines_for(bufnr, target_ft, only_start_lnum)
+--- `only_ordinal`, if given, restricts this to just the one block at that
+--- position among same-language blocks (see `block_ordinal`) — used by
+--- `PER_BLOCK_LANGS`' own per-block shadow buffers, each of which should
+--- only ever show its own block's body, not every other block of the
+--- same language merged in too.
+local function shadow_lines_for(bufnr, target_ft, only_ordinal)
   local total = vim.api.nvim_buf_line_count(bufnr)
   local lines = {}
   for i = 1, total do
     lines[i] = ''
   end
   local wrapper = ENTRY_WRAPPERS[target_ft]
+  local ordinal = 0
   for _, block in ipairs(babel.find_blocks(bufnr)) do
-    if lang.to_filetype(block.lang) == target_ft and (not only_start_lnum or block.start_lnum == only_start_lnum) then
-      for k, body_line in ipairs(block.body) do
-        lines[block.start_lnum + k] = body_line
-      end
-      if wrapper and babel.should_wrap_main(target_ft, babel.parse_header_args(block.args)) then
-        lines[block.start_lnum] = wrapper.open
-        lines[block.end_lnum] = wrapper.close
+    if lang.to_filetype(block.lang) == target_ft then
+      ordinal = ordinal + 1
+      if not only_ordinal or ordinal == only_ordinal then
+        for k, body_line in ipairs(block.body) do
+          lines[block.start_lnum + k] = body_line
+        end
+        if wrapper and babel.should_wrap_main(target_ft, babel.parse_header_args(block.args)) then
+          lines[block.start_lnum] = wrapper.open
+          lines[block.end_lnum] = wrapper.close
+        end
       end
     end
   end
@@ -247,12 +277,11 @@ local function shadow_path(root, ft, ext)
 end
 
 --- `per_block_shadow_path`: like `shadow_path`, but one directory per
---- block (keyed by its own `start_lnum`, the same "stable enough, keyed
---- by start_lnum" convention `mep.org.babel.cache_key` already uses for
---- exactly the same "identify a block across syncs" problem) rather than
---- one shared directory for the whole language — `PER_BLOCK_LANGS` only.
-local function per_block_shadow_path(root, ft, ext, block)
-  local dir = string.format('%s/%s/block_%d', root, ft, block.start_lnum)
+--- block (keyed by its `block_ordinal`, stable across the line-number
+--- shifts `block_ordinal`'s own comment explains) rather than one shared
+--- directory for the whole language — `PER_BLOCK_LANGS` only.
+local function per_block_shadow_path(root, ft, ext, ordinal)
+  local dir = string.format('%s/%s/block_%d', root, ft, ordinal)
   return dir, dir .. '/shadow' .. ext
 end
 
@@ -371,8 +400,8 @@ end
 --- `raw_lang`. For `PER_BLOCK_LANGS` (c/cpp), `block` identifies *which*
 --- block's own shadow this is — `st.shadow[ft]` is a `{ [block_key] =
 --- { bufnr, dir, path } }` table in that case (one entry per block,
---- `block_key` its own `start_lnum`), rather than the single shared bufnr
---- every other language uses. Deliberately writes no `compile_commands.
+--- `block_key` its own `block_ordinal`), rather than the single shared
+--- bufnr every other language uses. Deliberately writes no `compile_commands.
 --- json`/manifest here for `PER_BLOCK_LANGS` — that's `M.on_block_
 --- executed`'s own job, so clangd attaches with no flags at all the first
 --- time (same as every other language always has) and only gets real
@@ -385,13 +414,14 @@ local function get_or_create_shadow(org_bufnr, raw_lang, block)
   local st = state[org_bufnr]
 
   if PER_BLOCK_LANGS[ft] then
-    local block_key = tostring(block.start_lnum)
+    local ordinal = block_ordinal(org_bufnr, ft, block)
+    local block_key = tostring(ordinal)
     st.shadow[ft] = st.shadow[ft] or {}
     local entry = st.shadow[ft][block_key]
     if entry and vim.api.nvim_buf_is_valid(entry.bufnr) then
       return entry.bufnr
     end
-    local dir, path = per_block_shadow_path(st.cache_root, ft, lang.to_extension(raw_lang), block)
+    local dir, path = per_block_shadow_path(st.cache_root, ft, lang.to_extension(raw_lang), ordinal)
     pcall(vim.fn.mkdir, dir, 'p')
     local shadow = new_shadow_buffer(org_bufnr, path, ft)
     st.shadow[ft][block_key] = { bufnr = shadow, dir = dir, path = path }
@@ -505,7 +535,7 @@ function M.context_at_cursor(bufnr, lnum)
 
   local shadow
   if PER_BLOCK_LANGS[ft] then
-    local entry = st.shadow[ft] and st.shadow[ft][tostring(block.start_lnum)]
+    local entry = st.shadow[ft] and st.shadow[ft][tostring(block_ordinal(bufnr, ft, block))]
     shadow = entry and entry.bufnr
   else
     shadow = st.shadow[ft]
@@ -558,28 +588,24 @@ end
 --- commands.json` to match exactly what babel just compiled (same
 --- compiler `mep.org.babel.execute` itself resolves, via `babel.
 --- resolve_executable`, plus `forced_include_args` above for a wrapped
---- block's own `:includes`) and forces its shadow buffer's attached client(s)
---- to actually pick the new flags up. This is *not* a full client
---- restart — the client itself keeps running, still attached to every
---- other buffer — just a proper close+reopen of this one document
---- (`vim.lsp.buf_detach_client`/`buf_attach_client`, real `didClose`/
---- `didOpen` through Neovim's own client bookkeeping rather than
---- hand-crafted notify calls that would desync its internal document/
---- version tracking). A `workspace/didChangeWatchedFiles` notification
---- goes out first too (the protocol-correct "a file you care about
---- changed" signal, e.g. for a server's own index-cache invalidation) —
---- but confirmed empirically (clangd 21.1.8) that it alone does *not*
---- make clangd re-derive compile flags for an already-open document and
---- reparse it; the diagnostics it already computed under the old
---- fallback flags just sit there until the document is properly closed
---- and reopened, which is what the detach/reattach actually forces. A
---- no-op if polyglot isn't set up for `bufnr`, the block at `lnum` isn't
---- found, its language isn't `PER_BLOCK_LANGS`, its shadow was never
---- created (cursor never visited it — nothing to attach flags to yet),
---- or no compiler was resolved (mirrors `M.execute`'s own graceful-miss).
---- Deliberately runs regardless of the block's own exit code — the
---- compile *command* it documents doesn't depend on whether this
---- particular run happened to fail.
+--- block's own `:includes`), then restarts the shadow buffer's attached
+--- client(s) so a fresh process actually picks the new flags up. A real
+--- restart (`client:stop(true)`, then re-firing `FileType` once `LspDetach`
+--- confirms it's gone — see the loop below), not just a document close+
+--- reopen on the same running client: confirmed empirically (clangd
+--- 21.1.8) that neither a `workspace/didChangeWatchedFiles` notification
+--- nor a plain `didClose`+`didOpen` makes an *already-running* clangd
+--- re-scan a directory it already cached as having "no compilation
+--- database" — its own log kept reporting exactly that after either,
+--- with `gd`/references left permanently broken. A brand new process, on
+--- its own very first lookup for that directory, has no such stale cache
+--- to invalidate at all. A no-op if polyglot isn't set up for `bufnr`,
+--- the block at `lnum` isn't found, its language isn't `PER_BLOCK_LANGS`,
+--- its shadow was never created (cursor never visited it — nothing to
+--- attach flags to yet), or no compiler was resolved (mirrors `M.
+--- execute`'s own graceful-miss). Deliberately runs regardless of the
+--- block's own exit code — the compile *command* it documents doesn't
+--- depend on whether this particular run happened to fail.
 function M.on_block_executed(bufnr, lnum)
   local st = state[bufnr]
   if not st then
@@ -593,7 +619,7 @@ function M.on_block_executed(bufnr, lnum)
   if not ft or not PER_BLOCK_LANGS[ft] then
     return
   end
-  local entry = st.shadow[ft] and st.shadow[ft][tostring(block.start_lnum)]
+  local entry = st.shadow[ft] and st.shadow[ft][tostring(block_ordinal(bufnr, ft, block))]
   if not entry or not vim.api.nvim_buf_is_valid(entry.bufnr) then
     return
   end
@@ -614,12 +640,53 @@ function M.on_block_executed(bufnr, lnum)
     }),
   }, cdb_path)
 
-  for _, client in ipairs(vim.lsp.get_clients({ bufnr = entry.bufnr })) do
-    client:notify('workspace/didChangeWatchedFiles', {
-      changes = { { uri = vim.uri_from_fname(cdb_path), type = 2 } }, -- 2 = Changed
+  local clients = vim.lsp.get_clients({ bufnr = entry.bufnr })
+  local remaining = #clients
+  for _, client in ipairs(clients) do
+    -- Every buffer this client was attached to, snapshotted *before*
+    -- stopping it — clangd is a single shared process/client across every
+    -- c/cpp shadow buffer in the whole session (confirmed empirically:
+    -- `root_dir` resolves to nil for all of them, so `vim.lsp.enable`'s
+    -- own dedup reuses one client rather than starting a new one per
+    -- buffer), so stopping it detaches it from every *other* block's
+    -- shadow buffer too, not just this one — each of those needs its own
+    -- FileType re-fire too once the fresh client is ready, or they'd be
+    -- left with no LSP attached at all until independently torn down and
+    -- recreated.
+    local attached_bufs = vim.tbl_keys(client.attached_buffers or {})
+    -- `once = true` isn't enough by itself: LspDetach can fire for some
+    -- *other* client attached to the same buffer too (matched below by
+    -- client_id), and this one has to keep listening until its own
+    -- specific client actually detaches. `return true` from the callback
+    -- deletes just this autocmd once it has.
+    vim.api.nvim_create_autocmd('LspDetach', {
+      buffer = entry.bufnr,
+      callback = function(args)
+        if args.data.client_id ~= client.id then
+          return
+        end
+        remaining = remaining - 1
+        if remaining == 0 then
+          -- Re-fires FileType, the same event `vim.lsp.enable`'s own
+          -- autostart already listens on (see `new_shadow_buffer`) — a
+          -- fresh clangd process, on its own very first lookup for this
+          -- directory, has no stale "no compilation database here" cache
+          -- to invalidate at all. Confirmed empirically that this is
+          -- the one reliable way to get a newly-written compile_commands.
+          -- json actually picked up — clangd's own compilation-database
+          -- cache for an already-running process didn't invalidate from
+          -- either a `workspace/didChangeWatchedFiles` notification or a
+          -- plain document close+reopen on the same running client.
+          for _, b in ipairs(attached_bufs) do
+            if vim.api.nvim_buf_is_valid(b) then
+              vim.api.nvim_exec_autocmds('FileType', { buffer = b })
+            end
+          end
+        end
+        return true
+      end,
     })
-    vim.lsp.buf_detach_client(entry.bufnr, client.id)
-    vim.lsp.buf_attach_client(entry.bufnr, client.id)
+    client:stop(true)
   end
 end
 
@@ -671,6 +738,45 @@ local function translate_locations(result)
   return is_single and list[1] or list
 end
 
+--- Jump straight to the single item in `items` (a `vim.lsp.util.
+--- locations_to_items`-shaped list, already pointed at real org-buffer
+--- URIs by `translate_locations`) the same way `vim.lsp.buf.definition()`
+--- itself does — jumplist mark, tagstack push, open any closed fold — or
+--- populate & open the quickfix list for more than one. `bridge` has to
+--- do this itself rather than just handing off to `vim.lsp.handlers
+--- [method]` the way it does for hover/signature-help/rename: confirmed
+--- empirically that Neovim >= 0.11 dropped every location-returning
+--- method (`textDocument/definition`/`declaration`/`references`/
+--- `implementation`/`typeDefinition`) from `vim.lsp.handlers` entirely,
+--- handling them directly inside `vim.lsp.buf.definition()`/etc's own
+--- `get_locations` instead — `vim.lsp.handlers['textDocument/
+--- definition']` is `nil` on a real modern Neovim, which is exactly why
+--- `gd` used to silently do nothing here while `K` (hover, still
+--- handler-table-dispatched) worked fine.
+local function show_locations(bufnr, win, items)
+  if #items == 0 then
+    vim.notify('No locations found', vim.log.levels.INFO)
+    return
+  end
+  if #items == 1 then
+    local item = items[1]
+    local b = item.bufnr or vim.fn.bufadd(item.filename)
+    vim.cmd("normal! m'") -- save position in the jumplist, like a real gd
+    local from = vim.fn.getpos('.')
+    from[1] = bufnr
+    vim.fn.settagstack(vim.fn.win_getid(win), { items = { { tagname = vim.fn.expand('<cword>'), from = from } } }, 't')
+    vim.bo[b].buflisted = true
+    vim.api.nvim_win_set_buf(win, b)
+    vim.api.nvim_win_set_cursor(win, { item.lnum, item.col - 1 })
+    vim._with({ win = win }, function()
+      vim.cmd('normal! zv') -- open any fold the target line was hidden under
+    end)
+    return
+  end
+  vim.fn.setqflist({}, ' ', { title = 'LSP locations', items = items })
+  vim.cmd('botright copen')
+end
+
 local function translate_workspace_edit(edit)
   if not edit then
     return edit
@@ -694,16 +800,22 @@ end
 
 --- Sends `method` to the first client attached to the shadow buffer for
 --- the src block at `bufnr`'s cursor, running its response through
---- `translate` (if given) before handing it to Neovim's own default
---- handler for `method` — same display/jump/quickfix behavior a real
---- attached client would get, just re-targeted at the org buffer. Falls
---- back to `vim.lsp.buf[fallback_name]` (whatever's attached to the org
---- buffer itself, ordinarily nothing) when the cursor isn't inside a src
---- block at all — real org-mode LSPs, if any, still get a chance outside
---- of code.
+--- `translate` (if given) before handing it off — a location-returning
+--- method (`translate == translate_locations`, i.e. definition/
+--- declaration/references/implementation/type_definition) goes to `show_
+--- locations` (jump or quickfix, since `vim.lsp.handlers` no longer
+--- carries these on a modern Neovim — see `show_locations`'s own
+--- comment); anything else (hover, signature-help, rename) still goes to
+--- Neovim's own default handler for `method`, same display behavior a
+--- real attached client would get, just re-targeted at the org buffer.
+--- Falls back to `vim.lsp.buf[fallback_name]` (whatever's attached to the
+--- org buffer itself, ordinarily nothing) when the cursor isn't inside a
+--- src block at all — real org-mode LSPs, if any, still get a chance
+--- outside of code.
 local function bridge(method, fallback_name, translate, extra_params)
   return function()
     local bufnr = vim.api.nvim_get_current_buf()
+    local win = vim.api.nvim_get_current_win()
     local lnum = vim.api.nvim_win_get_cursor(0)[1]
     local ctx = M.context_at_cursor(bufnr, lnum)
     if not ctx then
@@ -722,6 +834,15 @@ local function bridge(method, fallback_name, translate, extra_params)
     client:request(method, params, function(err, result, rctx, rconfig)
       if translate then
         result = translate(result)
+      end
+      if translate == translate_locations then
+        if err then
+          vim.notify(err.message or tostring(err), vim.log.levels.ERROR)
+          return
+        end
+        local locations = result == nil and {} or (vim.islist(result) and result or { result })
+        show_locations(bufnr, win, vim.lsp.util.locations_to_items(locations, client.offset_encoding))
+        return
       end
       local handler = vim.lsp.handlers[method]
       if handler then
