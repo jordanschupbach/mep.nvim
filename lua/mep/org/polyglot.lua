@@ -93,7 +93,7 @@ local shadow_owner = {}
 --- false` (e.g. `scripts/try_init.lua`'s own "too heavy for a quick
 --- session" tradeoff) skips that whole-registry install entirely. Calls
 --- `on_installed(ts_lang)` once per language that successfully becomes
---- available; never for one with no curated registry entry (`r`
+--- available; never for one with no curated registry entry (`perl`, `r`
 --- — not installable this way at all) or a failed install (no compiler/
 --- git on PATH) — same graceful-miss contract as everywhere else this
 --- project touches tree-sitter.

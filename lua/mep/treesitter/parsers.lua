@@ -193,24 +193,28 @@ M.registry = {
     url = 'https://github.com/gdamore/tree-sitter-d',
     files = { 'src/parser.c', 'src/scanner.c' },
   },
-  -- `files` points at `src/parser.c`/`src/scanner.c` for consistency with
-  -- every other entry, but this particular upstream doesn't actually
-  -- commit a pre-generated `src/parser.c` (needs the tree-sitter CLI's
-  -- own `generate` step first, which this project's install pipeline
-  -- doesn't run) — confirmed empirically, so compiling this entry from
-  -- scratch fails. Still the right `url`: it's the one upstream that
-  -- ships a real `queries/highlights.scm` for perl at all (`ganezdragon/
-  -- tree-sitter-perl`, what nixpkgs' own prebuilt perl grammar actually
-  -- builds from, has `parser.c` but no `queries/` dir whatsoever) — so
-  -- this entry only ever resolves via `M.install`'s `parser_ready`
-  -- branch, copying queries alongside a perl parser that arrived some
-  -- other way (e.g. this repo's own `flake.nix` devShell, which already
-  -- puts nixpkgs' prebuilt perl.so on runtimepath), never by compiling
-  -- here itself.
-  perl = {
-    url = 'https://github.com/tree-sitter-perl/tree-sitter-perl',
-    files = { 'src/parser.c', 'src/scanner.c' },
-  },
+  -- Deliberately NOT a `perl` entry here — confirmed empirically this is
+  -- worse than no entry at all, not just incomplete. nixpkgs' own prebuilt
+  -- perl grammar (what `flake.nix`'s devShell puts on runtimepath) builds
+  -- from `ganezdragon/tree-sitter-perl`, which ships a real `parser.c` but
+  -- no `queries/` dir at all; the *only* upstream with a real perl
+  -- `queries/highlights.scm` is the unrelated `tree-sitter-perl/
+  -- tree-sitter-perl` org's grammar — a different project with a
+  -- different node-type schema, not just a newer version of the same one.
+  -- Pointing this entry at that second repo (so `M.install`'s
+  -- `parser_ready` branch would clone it just for queries, alongside
+  -- nixpkgs' *other* perl.so already on runtimepath) does resolve
+  -- `M.has_queries('perl')` — but every query in the copied files then
+  -- references node types (`(comment)` among them) that don't exist in
+  -- the actual grammar the loaded parser was built from, throwing a real,
+  -- visible "Invalid node type" tree-sitter query error the moment
+  -- anything tries to highlight with it (confirmed the hard way against a
+  -- real org buffer). Exactly the cross-upstream mixing this file's
+  -- sibling entries (and `flake.nix`'s own header comment) already avoid
+  -- on principle — `queries/org/injections.scm`'s own header comment
+  -- documents the resulting "parser-only, no highlighting" tradeoff for
+  -- `perl` (and `r`, in the same boat) until a from-scratch, same-source
+  -- perl parser+queries pair exists somewhere.
 }
 
 --- Names of every parser in the curated registry, sorted.

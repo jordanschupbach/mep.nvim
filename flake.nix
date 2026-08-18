@@ -81,23 +81,40 @@
         #    registry, so mep.treesitter's own git-clone-and-compile
         #    install still covers them, same as php/ocaml above, just
         #    without even a parser head start from this derivation.
-        # `perl`/`typescript`/`tsx` are included below despite nixpkgs'
-        # prebuilt grammar for each shipping *no* `queries/` directory
-        # either (confirmed empirically, same as php/ocaml) — unlike those
-        # two, still worth listing here: `perl.so`/`typescript.so`/`tsx.so`
-        # landing on runtimepath at all still saves mep.treesitter's own
-        # install a full git-clone-and-compile the first time an org
-        # buffer with one of these embedded needs it, leaving only a
-        # (much cheaper, no compiler needed) git-clone-for-queries-only
-        # step at that point — see `mep.treesitter.install.M.install`'s
-        # own `parser_ready` branch. That queries step still needs a
-        # network connection at runtime, same as php/ocaml/nim/d always
-        # have; there's no nix-only way to get real highlighting for any
-        # of these five. `perl` itself has no entry in `parsers.lua` at
-        # all yet (added alongside this comment) — `r` still doesn't, and
-        # stays a parser-only, no-highlights case for now, same tradeoff
-        # `queries/org/injections.scm`'s own header comment already
-        # documents for both.
+        # `typescript`/`tsx` are included below despite nixpkgs' prebuilt
+        # grammar for each shipping *no* `queries/` directory either
+        # (confirmed empirically, same as php/ocaml) — still worth listing
+        # here because nixpkgs' own source for both (confirmed against its
+        # own `grammars/tree-sitter-typescript.json`) is a pinned commit of
+        # the *same* `tree-sitter/tree-sitter-typescript` repo `parsers.lua`
+        # already clones queries from at runtime — same upstream, just two
+        # different commits of it, not two different grammars, so mixing
+        # the two here is safe in a way it isn't for every language (see
+        # `perl` below). `typescript.so`/`tsx.so` landing on runtimepath
+        # from this derivation still saves mep.treesitter's own install a
+        # full git-clone-and-compile the first time an org buffer with one
+        # of these embedded needs it, leaving only a (much cheaper, no
+        # compiler needed) git-clone-for-queries-only step at that point —
+        # see `mep.treesitter.install.M.install`'s own `parser_ready`
+        # branch. That queries step still needs a network connection at
+        # runtime, same as php/ocaml/nim/d always have.
+        #
+        # `perl` is deliberately NOT included, and has no entry in
+        # `parsers.lua` either (unlike typescript/tsx above) — confirmed
+        # empirically that nixpkgs' own prebuilt perl grammar builds from
+        # `ganezdragon/tree-sitter-perl`, which ships no `queries/`
+        # directory at all, and the only upstream that *does* ship a real
+        # perl `queries/highlights.scm` (`tree-sitter-perl/tree-sitter-
+        # perl`) is a wholly unrelated project with a different node-type
+        # schema, not a fork or newer version of the same grammar — pointing
+        # mep.treesitter's own install at it to supplement queries for
+        # nixpkgs' perl.so throws a real "Invalid node type" tree-sitter
+        # query error the moment anything tries to highlight with it,
+        # worse than the no-highlighting status quo. `r` has the same
+        # "parser only, no real queries/highlights.scm anywhere" problem
+        # (see `queries/org/injections.scm`'s own header comment on both) —
+        # there's no nix-only, or even network-at-runtime, way to get real
+        # highlighting for perl or r right now.
         mep-treesitter-grammars =
           let
             # Not in `grammars` below along with everything else: nixpkgs'
