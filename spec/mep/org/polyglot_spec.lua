@@ -332,7 +332,7 @@ describe('mep.org.polyglot', function()
       orig_detach = vim.lsp.buf_detach_client
       orig_attach = vim.lsp.buf_attach_client
       vim.fn.executable = function(name)
-        return name == 'g++' and 1 or 0
+        return (name == 'g++' or name == 'gcc') and 1 or 0
       end
       vim.lsp.get_clients = function()
         return {}
@@ -363,6 +363,51 @@ describe('mep.org.polyglot', function()
       assert.are.equal(1, #decoded)
       assert.are.equal(dir, decoded[1].directory)
       assert.are.equal(shadow_path, decoded[1].file)
+      assert.are.same({ 'g++', '-c', shadow_path }, decoded[1].arguments)
+    end)
+
+    it('adds -include flags for a :main yes block\'s own :includes, so a missing #include in the wrap still resolves', function()
+      -- ENTRY_WRAPPERS' synthetic `int main(void) { ... }` wrap has no
+      -- room for a real #include line (see its own comment) — confirmed
+      -- empirically that without this, clangd reports "implicit
+      -- declaration of function 'printf'" for exactly this shape.
+      local bufnr = buf({ '#+begin_src C :main yes :includes <stdio.h>', 'printf("hi");', '#+end_src' })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local ctx = polyglot.context_at_cursor(bufnr, 2)
+      local shadow_path = vim.api.nvim_buf_get_name(ctx.shadow_bufnr)
+      local dir = vim.fn.fnamemodify(shadow_path, ':h')
+
+      polyglot.on_block_executed(bufnr, 2)
+
+      local decoded = vim.json.decode(table.concat(vim.fn.readfile(dir .. '/compile_commands.json'), '\n'))
+      assert.are.same({ 'gcc', '-c', '-include', 'stdio.h', shadow_path }, decoded[1].arguments)
+    end)
+
+    it('adds one -include per :includes token, stripping the angle brackets/quotes', function()
+      local bufnr = buf({ '#+begin_src cpp :main yes :includes <iostream> <vector>', 'std::cout << 1;', '#+end_src' })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local ctx = polyglot.context_at_cursor(bufnr, 2)
+      local dir = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(ctx.shadow_bufnr), ':h')
+
+      polyglot.on_block_executed(bufnr, 2)
+
+      local decoded = vim.json.decode(table.concat(vim.fn.readfile(dir .. '/compile_commands.json'), '\n'))
+      local args = decoded[1].arguments
+      assert.is_true(vim.tbl_contains(args, '-include'))
+      assert.is_true(vim.tbl_contains(args, 'iostream'))
+      assert.is_true(vim.tbl_contains(args, 'vector'))
+    end)
+
+    it('does not add -include flags for a self-contained (:main no / default) block, even with :includes set', function()
+      local bufnr = buf({ '#+begin_src cpp :includes <iostream>', '#include <iostream>', 'int main() { return 0; }', '#+end_src' })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local ctx = polyglot.context_at_cursor(bufnr, 2)
+      local shadow_path = vim.api.nvim_buf_get_name(ctx.shadow_bufnr)
+      local dir = vim.fn.fnamemodify(shadow_path, ':h')
+
+      polyglot.on_block_executed(bufnr, 2)
+
+      local decoded = vim.json.decode(table.concat(vim.fn.readfile(dir .. '/compile_commands.json'), '\n'))
       assert.are.same({ 'g++', '-c', shadow_path }, decoded[1].arguments)
     end)
 

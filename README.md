@@ -1446,12 +1446,15 @@ structure editing below works immediately, even before (or without) the
     empirically that the notification alone doesn't make clangd re-derive
     flags and reparse an already-open document on its own — the
     diagnostics it already computed under the old fallback flags just sit
-    there until the document is actually reopened. This still won't
-    resolve a *missing*
-    `#include` in a synthetically-wrapped (`:main yes`) block's own text
-    (a separate, pre-existing limitation — see the `:main yes` paragraph
-    above); a self-contained (`:main no`, the default) block that already
-    writes its own real `#include`s is fully covered. `mep.lsp` itself
+    there until the document is actually reopened. A `:main yes` block's
+    own `:includes` also gets translated into `-include <header>`
+    compiler flags in that same `compile_commands.json` entry (stripped
+    of their `<>`/`""`) — the entry-point wrap's own two free lines have
+    no room for a real `#include` directive (see the `:main yes`
+    paragraph above), but an ordinary compiler flag has no such
+    restriction, so `printf`/`std::cout`/etc. resolve correctly even
+    though the shadow buffer's own text never literally contains the
+    `#include` line. `mep.lsp` itself
     also appends a `--query-driver=...` flag to clangd's `cmd`, scoped to
     wherever `gcc`/`g++`/`cc`/`c++`/`clang`/`clang++` actually resolve on
     your own `PATH` — needed for clangd to discover the real compiler's

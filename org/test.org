@@ -6,12 +6,12 @@
 #include <iostream>
 
 int main() {
-    std::cout << "Hellozz, world";
+    std::cout << "Hello, world" << std::endl;
     return 0;
 }
 #+END_SRC
 #+RESULTS:
-: Hellozz, world
+: Hello, world
 
 * C Main File Example
 
@@ -46,7 +46,7 @@ void quicksort(int arr[], int low, int high) {
 }
 
 int main() {
-    int arr[] = {10, 7, 8, 9, 1, 5};
+    int arr[] = {10, 17, 8, 9, 1, 5};
     int n = sizeof(arr) / sizeof(arr[0]);
     quicksort(arr, 0, n - 1);
     
@@ -60,7 +60,7 @@ int main() {
 #+RESULTS:
 #+begin_example
 Sorted array: 
-1 5 7 8 9 10 
+1 5 8 9 10 17 
 #+end_example
 
 

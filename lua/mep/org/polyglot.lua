@@ -520,12 +520,45 @@ function M.context_at_cursor(bufnr, lnum)
   return { shadow_bufnr = shadow, ft = ft, block = block }
 end
 
+--- `-include <header>` compiler-flag pairs (GCC/Clang: force-includes a
+--- header at the top of the translation unit without needing a literal
+--- `#include` line anywhere in the source) for `hargs.includes`, but only
+--- when `ENTRY_WRAPPERS`'s synthetic entry-point wrap actually applies
+--- (`babel.should_wrap_main`) — the one case where the shadow buffer's
+--- own text is missing a real `#include` for them at all (see
+--- `ENTRY_WRAPPERS`'s own comment: a preprocessor directive can't share a
+--- line with the wrapper, so `:includes` was never rendered into the
+--- shadow buffer's text the way `mep.org.babel.wrap_in_main` renders it
+--- into the real *compiled* script). `-c`/`-include` are ordinary
+--- compiler flags with no such one-directive-per-physical-line
+--- restriction, so `compile_commands.json` can close this gap even
+--- though the shadow buffer's own two free lines never could — this is
+--- what makes a `:main yes :includes <stdio.h>` block's `printf` resolve
+--- instead of reporting "implicit declaration". A self-contained
+--- (`:main no`, the default) block already has its own real `#include`s
+--- in its text, so this returns nothing for it.
+local function forced_include_args(ft, hargs)
+  if not hargs.includes or not babel.should_wrap_main(ft, hargs) then
+    return {}
+  end
+  local args = {}
+  for token in hargs.includes:gmatch('%S+') do
+    local header = token:gsub('^[<"]', ''):gsub('[>"]$', '')
+    if header ~= '' then
+      args[#args + 1] = '-include'
+      args[#args + 1] = header
+    end
+  end
+  return args
+end
+
 --- Called after `mep.org.babel.execute` finishes running the src block at
 --- `lnum` (wired from `mep.org.org`'s own babel-execute keymaps). For
 --- `PER_BLOCK_LANGS` (c/cpp), regenerates that block's own `compile_
 --- commands.json` to match exactly what babel just compiled (same
 --- compiler `mep.org.babel.execute` itself resolves, via `babel.
---- resolve_executable`) and forces its shadow buffer's attached client(s)
+--- resolve_executable`, plus `forced_include_args` above for a wrapped
+--- block's own `:includes`) and forces its shadow buffer's attached client(s)
 --- to actually pick the new flags up. This is *not* a full client
 --- restart — the client itself keeps running, still attached to every
 --- other buffer — just a proper close+reopen of this one document
@@ -570,10 +603,14 @@ function M.on_block_executed(bufnr, lnum)
     return
   end
 
+  local arguments = { exe, '-c' }
+  vim.list_extend(arguments, forced_include_args(ft, babel.parse_header_args(block.args)))
+  arguments[#arguments + 1] = entry.path
+
   local cdb_path = entry.dir .. '/compile_commands.json'
   pcall(vim.fn.writefile, {
     vim.json.encode({
-      { directory = entry.dir, file = entry.path, arguments = { exe, '-c', entry.path } },
+      { directory = entry.dir, file = entry.path, arguments = arguments },
     }),
   }, cdb_path)
 
