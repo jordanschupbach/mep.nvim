@@ -66,6 +66,15 @@ describe('mep.filetree.tree', function()
       assert.is_true(has_hidden)
     end)
 
+    it('flags dotfile children as is_dotfile, everything else as not', function()
+      local node = tree.new_root(root)
+      tree.ensure_children(node, true)
+
+      for _, c in ipairs(node.children) do
+        assert.are.equal(c.name == '.hidden', c.is_dotfile)
+      end
+    end)
+
     it('sets depth and parent on each child', function()
       local node = tree.new_root(root)
       tree.ensure_children(node, false)
@@ -133,6 +142,15 @@ describe('mep.filetree.tree', function()
         names[#names + 1] = c.name
       end
       assert.is_true(vim.tbl_contains(names, 'ignored.txt'))
+    end)
+
+    it('flags gitignored children as is_gitignored, kept ones as not', function()
+      local node = tree.new_root(root)
+      tree.ensure_children(node, false, true)
+
+      for _, c in ipairs(node.children) do
+        assert.are.equal(c.name == 'ignored.txt', c.is_gitignored)
+      end
     end)
 
     it('does not error scanning a directory outside any git repo', function()

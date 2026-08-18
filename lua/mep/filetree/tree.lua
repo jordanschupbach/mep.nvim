@@ -62,12 +62,24 @@ local function scan_children(dir_path, show_hidden, show_gitignored)
     end
   end
 
-  local ignored = show_gitignored and {} or gitignored_names(dir_path, names)
+  -- Always computed, even when show_gitignored is true and nothing gets
+  -- filtered by it: `ui.lua`'s own dotfile/gitignored marker needs to
+  -- know *why* an entry is currently visible (see `entry.is_gitignored`
+  -- below), which the old "only bother asking git when we're about to
+  -- filter" shortcut couldn't answer once show_gitignored=true stopped
+  -- asking at all.
+  local ignored = gitignored_names(dir_path, names)
 
   local dirs, files = {}, {}
   for _, name in ipairs(names) do
-    if not ignored[name] then
-      local entry = { name = name, path = dir_path .. '/' .. name }
+    local is_gitignored = ignored[name] == true
+    if show_gitignored or not is_gitignored then
+      local entry = {
+        name = name,
+        path = dir_path .. '/' .. name,
+        is_dotfile = vim.startswith(name, '.'),
+        is_gitignored = is_gitignored,
+      }
       local typ = types[name]
       if typ == 'directory' then
         entry.is_dir = true

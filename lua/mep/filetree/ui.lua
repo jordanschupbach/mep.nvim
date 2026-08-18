@@ -43,6 +43,28 @@ function M.close_window(win)
   end
 end
 
+-- `node.is_gitignored`/`node.is_dotfile` (mep.filetree.tree's own scan)
+-- -> a trailing " [i]"/" [.]" suffix plus the name highlight group that
+-- covers both the name and that suffix. Gitignored wins over dotfile for
+-- an entry that's somehow both (git doesn't care whether a path starts
+-- with '.') — it's the rarer, more specific reason something's only
+-- visible because show_hidden/show_gitignored got toggled on, and the
+-- more useful one to call out: a dotfile's own name already reveals it's
+-- a dotfile, but nothing about a gitignored entry's *name* reveals that
+-- on its own (a `build/` or `node_modules/` doesn't look any different
+-- from a real one). Falls back to `MepFiletreeDirectory` for an ordinary
+-- (not hidden-shown) directory, same as before this existed; a plain
+-- file gets neither, same as before too.
+local function hidden_marker(node)
+  if node.is_gitignored then
+    return ' [i]', 'MepFiletreeGitignored'
+  end
+  if node.is_dotfile then
+    return ' [.]', 'MepFiletreeDotfile'
+  end
+  return '', node.is_dir and 'MepFiletreeDirectory' or nil
+end
+
 -- Builds one line's text plus the byte ranges to highlight, tracking byte
 -- offsets by hand (rather than string.format) since the glyphs involved
 -- are multi-byte UTF-8 and nvim_buf_add_highlight takes byte columns.
@@ -64,12 +86,18 @@ local function render_node(node)
   local name_start = icon_end + 1 -- one space between icon and name
   local name_end = name_start + #name
 
-  local line = prefix .. icon .. ' ' .. name
-  return line, icon_start, icon_end, icon_hl, name_start, name_end
+  local suffix, name_hl = hidden_marker(node)
+  local name_hl_end = name_end + #suffix
+
+  local line = prefix .. icon .. ' ' .. name .. suffix
+  return line, icon_start, icon_end, icon_hl, name_start, name_hl_end, name_hl
 end
 
 --- Render `nodes` (as returned by tree.flatten) into `buf`, one per line,
---- with icon and (for directories) name highlights applied. When `win`
+--- with icon and name highlights applied (directories get
+--- `MepFiletreeDirectory`; an entry only visible because show_hidden/
+--- show_gitignored is on gets a dim `[.]`/`[i]` suffix instead — see
+--- `hidden_marker`). When `win`
 --- is given, a footer is pinned to the *bottom of the window* — a
 --- horizontal rule (sized to the window's current width) and a "Press ?
 --- for help" hint, both dimmed via `MepFiletreeHint` — by padding with
@@ -87,9 +115,9 @@ function M.render(buf, nodes, win)
   local lines = {}
   local marks = {}
   for i, node in ipairs(nodes) do
-    local line, icon_start, icon_end, icon_hl, name_start, name_end = render_node(node)
+    local line, icon_start, icon_end, icon_hl, name_start, name_hl_end, name_hl = render_node(node)
     lines[i] = line
-    marks[i] = { icon_start, icon_end, icon_hl, node.is_dir, name_start, name_end }
+    marks[i] = { icon_start, icon_end, icon_hl, name_start, name_hl_end, name_hl }
   end
 
   local footer_start = nil
@@ -111,10 +139,10 @@ function M.render(buf, nodes, win)
   vim.api.nvim_buf_clear_namespace(buf, name_ns, 0, -1)
   vim.api.nvim_buf_clear_namespace(buf, hint_ns, 0, -1)
   for i, m in ipairs(marks) do
-    local icon_start, icon_end, icon_hl, is_dir, name_start, name_end = m[1], m[2], m[3], m[4], m[5], m[6]
+    local icon_start, icon_end, icon_hl, name_start, name_hl_end, name_hl = m[1], m[2], m[3], m[4], m[5], m[6]
     pcall(vim.api.nvim_buf_add_highlight, buf, icon_ns, icon_hl, i - 1, icon_start, icon_end)
-    if is_dir then
-      pcall(vim.api.nvim_buf_add_highlight, buf, name_ns, 'MepFiletreeDirectory', i - 1, name_start, name_end)
+    if name_hl then
+      pcall(vim.api.nvim_buf_add_highlight, buf, name_ns, name_hl, i - 1, name_start, name_hl_end)
     end
   end
   if footer_start then

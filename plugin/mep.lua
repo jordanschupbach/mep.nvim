@@ -24,6 +24,15 @@ local function set_highlights()
   vim.api.nvim_set_hl(0, 'MepIconDirectory', { link = 'Directory', default = true })
   vim.api.nvim_set_hl(0, 'MepFiletreeDirectory', { link = 'Directory', default = true })
   vim.api.nvim_set_hl(0, 'MepFiletreeHint', { link = 'Comment', default = true })
+  -- Both dim (same as MepFiletreeHint's own footer text) since either one
+  -- only ever shows up at all with show_hidden/show_gitignored toggled on
+  -- ('H') — the color alone doesn't need to carry the dotfile-vs-
+  -- gitignored distinction, the "[.]"/"[i]" suffix text does (see
+  -- mep.filetree.ui's own render_node) — but each is still its own group,
+  -- not both aliased to MepFiletreeHint, so a colorscheme/user can tell
+  -- them apart with color too if they want to.
+  vim.api.nvim_set_hl(0, 'MepFiletreeDotfile', { link = 'Comment', default = true })
+  vim.api.nvim_set_hl(0, 'MepFiletreeGitignored', { link = 'Comment', default = true })
   vim.api.nvim_set_hl(0, 'MepDashboardLogo', { link = 'Title', default = true })
   vim.api.nvim_set_hl(0, 'MepDashboardVersion', { link = 'Title', default = true })
   vim.api.nvim_set_hl(0, 'MepDashboardCommand', { link = 'Special', default = true })

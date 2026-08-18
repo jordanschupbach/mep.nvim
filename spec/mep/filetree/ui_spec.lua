@@ -115,6 +115,49 @@ describe('mep.filetree.ui', function()
       assert.are.equal(0, marks[1][2]) -- row 0: the directory line
     end)
 
+    it('marks a dotfile with a dim "[.]" suffix, not the gitignored one', function()
+      local nodes = { { name = '.env', is_dir = false, depth = 0, is_dotfile = true } }
+      ui.render(buf, nodes)
+
+      local line = vim.api.nvim_buf_get_lines(buf, 0, -1, false)[1]
+      assert.matches('%[%.%]$', line)
+
+      local ns = vim.api.nvim_get_namespaces()['mep_filetree_names']
+      local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })
+      assert.are.equal(1, #marks)
+      assert.are.equal('MepFiletreeDotfile', marks[1][4].hl_group)
+    end)
+
+    it('marks a gitignored entry with a dim "[i]" suffix', function()
+      local nodes = { { name = 'build', is_dir = false, depth = 0, is_gitignored = true } }
+      ui.render(buf, nodes)
+
+      local line = vim.api.nvim_buf_get_lines(buf, 0, -1, false)[1]
+      assert.matches('%[i%]$', line)
+
+      local ns = vim.api.nvim_get_namespaces()['mep_filetree_names']
+      local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })
+      assert.are.equal(1, #marks)
+      assert.are.equal('MepFiletreeGitignored', marks[1][4].hl_group)
+    end)
+
+    it('prefers the gitignored marker over the dotfile one when an entry is both', function()
+      local nodes = { { name = '.env', is_dir = false, depth = 0, is_dotfile = true, is_gitignored = true } }
+      ui.render(buf, nodes)
+
+      local line = vim.api.nvim_buf_get_lines(buf, 0, -1, false)[1]
+      assert.matches('%[i%]$', line)
+      assert.is_not.matches('%[%.%]', line)
+    end)
+
+    it('adds no suffix or dim highlight for an ordinary visible file', function()
+      local nodes = { { name = 'main.lua', is_dir = false, depth = 0 } }
+      ui.render(buf, nodes)
+
+      local line = vim.api.nvim_buf_get_lines(buf, 0, -1, false)[1]
+      assert.is_not.matches('%[.%]$', line)
+    end)
+
     it('leaves the buffer unmodifiable after rendering', function()
       ui.render(buf, {})
       assert.is_false(vim.bo[buf].modifiable)
