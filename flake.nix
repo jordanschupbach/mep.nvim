@@ -72,27 +72,64 @@
         #    org-babel PHP blocks — see `lua/mep/org/lang.lua`'s own
         #    comment on why) — left to mep.treesitter's own install too.
         #  - `vimdoc`: not in nixpkgs' `tree-sitter-grammars` set at all.
-        # `perl`/`r` are included despite having no entry in `parsers.lua`
-        # at all (neither is installable through mep.treesitter's own
-        # curated-registry mechanism) — `queries/org/injections.scm`
-        # already has an injection pattern for both, so a `perl.so`/`r.so`
-        # from *any* source landing on runtimepath is enough for their
-        # embedded org-babel blocks to highlight, without mep.treesitter
-        # ever needing to know how either got there.
+        #  - `ocaml`: same as php — nixpkgs' prebuilt grammar ships no
+        #    `queries/` directory at all — left to mep.treesitter's own
+        #    install.
+        #  - `nim`/`d`: not in nixpkgs' `tree-sitter-grammars` set at all
+        #    (confirmed empirically: no `tree-sitter-nim`/`tree-sitter-d`
+        #    attribute exists) — both are in `parsers.lua`'s own curated
+        #    registry, so mep.treesitter's own git-clone-and-compile
+        #    install still covers them, same as php/ocaml above, just
+        #    without even a parser head start from this derivation.
+        # `perl`/`typescript`/`tsx` are included below despite nixpkgs'
+        # prebuilt grammar for each shipping *no* `queries/` directory
+        # either (confirmed empirically, same as php/ocaml) — unlike those
+        # two, still worth listing here: `perl.so`/`typescript.so`/`tsx.so`
+        # landing on runtimepath at all still saves mep.treesitter's own
+        # install a full git-clone-and-compile the first time an org
+        # buffer with one of these embedded needs it, leaving only a
+        # (much cheaper, no compiler needed) git-clone-for-queries-only
+        # step at that point — see `mep.treesitter.install.M.install`'s
+        # own `parser_ready` branch. That queries step still needs a
+        # network connection at runtime, same as php/ocaml/nim/d always
+        # have; there's no nix-only way to get real highlighting for any
+        # of these five. `perl` itself has no entry in `parsers.lua` at
+        # all yet (added alongside this comment) — `r` still doesn't, and
+        # stays a parser-only, no-highlights case for now, same tradeoff
+        # `queries/org/injections.scm`'s own header comment already
+        # documents for both.
         mep-treesitter-grammars =
           let
+            # Not in `grammars` below along with everything else: nixpkgs'
+            # tree-sitter-crystal ships a real `queries/` directory, but
+            # its actual highlights.scm (and folds/context/aerial) live
+            # nested under `queries/nvim/` instead — the top-level
+            # `queries/` only has `injections.scm` — a real, if unusual,
+            # upstream layout (confirmed empirically), not a nixpkgs
+            # packaging quirk, so the generic per-grammar loop below
+            # (which only ever looks at `<grammar>/queries` directly)
+            # would silently install injections with no highlights at all.
+            # Handled as its own copy step, sourcing `queries/nvim/`
+            # instead, right after that loop.
+            crystalGrammar = pkgs.tree-sitter-grammars.tree-sitter-crystal;
             grammars = {
               bash = pkgs.tree-sitter-grammars.tree-sitter-bash;
               c = pkgs.tree-sitter-grammars.tree-sitter-c;
+              clojure = pkgs.tree-sitter-grammars.tree-sitter-clojure;
               cpp = pkgs.tree-sitter-grammars.tree-sitter-cpp;
               c_sharp = pkgs.tree-sitter-grammars.tree-sitter-c-sharp;
               css = pkgs.tree-sitter-grammars.tree-sitter-css;
               dockerfile = pkgs.tree-sitter-grammars.tree-sitter-dockerfile;
+              elixir = pkgs.tree-sitter-grammars.tree-sitter-elixir;
+              fortran = pkgs.tree-sitter-grammars.tree-sitter-fortran;
               go = pkgs.tree-sitter-grammars.tree-sitter-go;
+              haskell = pkgs.tree-sitter-grammars.tree-sitter-haskell;
               html = pkgs.tree-sitter-grammars.tree-sitter-html;
               java = pkgs.tree-sitter-grammars.tree-sitter-java;
               javascript = pkgs.tree-sitter-grammars.tree-sitter-javascript;
               json = pkgs.tree-sitter-grammars.tree-sitter-json;
+              julia = pkgs.tree-sitter-grammars.tree-sitter-julia;
+              kotlin = pkgs.tree-sitter-grammars.tree-sitter-kotlin;
               lua = pkgs.tree-sitter-grammars.tree-sitter-lua;
               markdown = pkgs.tree-sitter-grammars.tree-sitter-markdown;
               markdown_inline = pkgs.tree-sitter-grammars.tree-sitter-markdown-inline;
@@ -102,12 +139,14 @@
               r = pkgs.tree-sitter-grammars.tree-sitter-r;
               ruby = pkgs.tree-sitter-grammars.tree-sitter-ruby;
               rust = pkgs.tree-sitter-grammars.tree-sitter-rust;
+              scala = pkgs.tree-sitter-grammars.tree-sitter-scala;
               sql = pkgs.tree-sitter-grammars.tree-sitter-sql;
               toml = pkgs.tree-sitter-grammars.tree-sitter-toml;
               tsx = pkgs.tree-sitter-grammars.tree-sitter-tsx;
               typescript = pkgs.tree-sitter-grammars.tree-sitter-typescript;
               vim = pkgs.tree-sitter-grammars.tree-sitter-vim;
               yaml = pkgs.tree-sitter-grammars.tree-sitter-yaml;
+              zig = pkgs.tree-sitter-grammars.tree-sitter-zig;
             };
           in
           pkgs.runCommand "mep-treesitter-grammars" { } (
@@ -123,6 +162,11 @@
                 fi
               '') grammars
             )
+            + ''
+              install -Dm444 ${crystalGrammar}/parser $out/nvim/site/parser/crystal.so
+              mkdir -p $out/nvim/site/queries/crystal
+              cp -r ${crystalGrammar}/queries/nvim/. $out/nvim/site/queries/crystal/
+            ''
             + ''
               # tree-sitter-cpp's own highlights.scm is a thin C++-only
               # overlay (class/template/namespace/...) that assumes it's

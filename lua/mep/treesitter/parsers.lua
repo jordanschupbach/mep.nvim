@@ -193,6 +193,24 @@ M.registry = {
     url = 'https://github.com/gdamore/tree-sitter-d',
     files = { 'src/parser.c', 'src/scanner.c' },
   },
+  -- `files` points at `src/parser.c`/`src/scanner.c` for consistency with
+  -- every other entry, but this particular upstream doesn't actually
+  -- commit a pre-generated `src/parser.c` (needs the tree-sitter CLI's
+  -- own `generate` step first, which this project's install pipeline
+  -- doesn't run) — confirmed empirically, so compiling this entry from
+  -- scratch fails. Still the right `url`: it's the one upstream that
+  -- ships a real `queries/highlights.scm` for perl at all (`ganezdragon/
+  -- tree-sitter-perl`, what nixpkgs' own prebuilt perl grammar actually
+  -- builds from, has `parser.c` but no `queries/` dir whatsoever) — so
+  -- this entry only ever resolves via `M.install`'s `parser_ready`
+  -- branch, copying queries alongside a perl parser that arrived some
+  -- other way (e.g. this repo's own `flake.nix` devShell, which already
+  -- puts nixpkgs' prebuilt perl.so on runtimepath), never by compiling
+  -- here itself.
+  perl = {
+    url = 'https://github.com/tree-sitter-perl/tree-sitter-perl',
+    files = { 'src/parser.c', 'src/scanner.c' },
+  },
 }
 
 --- Names of every parser in the curated registry, sorted.
