@@ -630,13 +630,32 @@ local function forced_include_args(ft, hargs)
   return args
 end
 
+--- `hargs.flags`'s own whitespace-separated tokens (e.g. `pkg-config
+--- --cflags --libs <pkg>` output pasted into `:flags`), unlike `:includes`
+--- above not gated on `should_wrap_main` — these are ordinary compiler
+--- flags (`-I`, `-D`, `-l`, ...) that apply to a block's compile
+--- invocation regardless of whether it's a self-contained program or a
+--- wrapped snippet, so clangd needs them either way to resolve the same
+--- headers/symbols `mep.org.babel.execute` actually compiles against.
+local function forced_flag_args(hargs)
+  local args = {}
+  if not hargs.flags then
+    return args
+  end
+  for token in hargs.flags:gmatch('%S+') do
+    args[#args + 1] = token
+  end
+  return args
+end
+
 --- Called after `mep.org.babel.execute` finishes running the src block at
 --- `lnum` (wired from `mep.org.org`'s own babel-execute keymaps). For
 --- `COMPILE_DB_LANGS` (c/cpp), regenerates that block's own `compile_
 --- commands.json` to match exactly what babel just compiled (same
 --- compiler `mep.org.babel.execute` itself resolves, via `babel.
 --- resolve_executable`, plus `forced_include_args` above for a wrapped
---- block's own `:includes`), then restarts the shadow buffer's attached
+--- block's own `:includes` and `forced_flag_args` for its `:flags`),
+--- then restarts the shadow buffer's attached
 --- client(s) so a fresh process actually picks the new flags up. A real
 --- restart (`client:stop(true)`, then re-firing `FileType` once `LspDetach`
 --- confirms it's gone — see the loop below), not just a document close+
@@ -677,8 +696,10 @@ function M.on_block_executed(bufnr, lnum)
     return
   end
 
+  local hargs = babel.parse_header_args(block.args)
   local arguments = { exe, '-c' }
-  vim.list_extend(arguments, forced_include_args(ft, babel.parse_header_args(block.args)))
+  vim.list_extend(arguments, forced_include_args(ft, hargs))
+  vim.list_extend(arguments, forced_flag_args(hargs))
   arguments[#arguments + 1] = entry.path
 
   local cdb_path = entry.dir .. '/compile_commands.json'

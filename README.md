@@ -1170,7 +1170,17 @@ structure editing below works immediately, even before (or without) the
   no`) assumes the block is already a self-contained program, since
   that's the common case for something worth pasting into a src block
   (see `mep.org.polyglot`'s own section above for the identical `:main`
-  contract its shadow buffers use). A failed run still writes whatever
+  contract its shadow buffers use). Also for a compiled language,
+  `:flags` (whitespace-separated, e.g. `:flags -Wall $(pkg-config
+  --cflags --libs gtk+-3.0)` typed out as its already-expanded tokens —
+  this project doesn't shell out to `pkg-config` itself, `:flags` just
+  forwards whatever string you give it) is appended to the compile
+  invocation, so C/C++ blocks can link against a library found via
+  `pkg-config --cflags --libs <pkg>` (or any other extra `-I`/`-D`/`-l`
+  flags) without needing a session or a Makefile; `mep.org.polyglot`
+  also feeds `:flags` into a c/cpp block's own `compile_commands.json`
+  (alongside `:includes`) so clangd's diagnostics agree with what
+  `<C-c>e` actually compiles. A failed run still writes whatever
   stdout it produced and separately warns with the first substantive
   line of stderr — skipping a leading `# <package>` header `go build`
   prints before the real error when compiling a file outside a module —
@@ -1178,7 +1188,7 @@ structure editing below works immediately, even before (or without) the
   swallowing them. Explicitly deferred, likely indefinitely: persistent
   per-block sessions, and the rest of real org-babel's header-argument
   surface (`:session`, `:noweb`, `:cache`, etc.) beyond `:results`/
-  `:var`/`:tangle`/`:includes`/`:main`.
+  `:var`/`:tangle`/`:includes`/`:main`/`:flags`.
 - **`mep.org.fold`** — a headline-depth `foldexpr`, used by the per-fold
   `<Tab>` toggle. Deliberately not the same as generic `mep.treesitter`
   folding: org's fold unit is the headline subtree (heading + body +
@@ -1476,7 +1486,11 @@ structure editing below works immediately, even before (or without) the
     paragraph above), but an ordinary compiler flag has no such
     restriction, so `printf`/`std::cout`/etc. resolve correctly even
     though the shadow buffer's own text never literally contains the
-    `#include` line. `mep.lsp` itself
+    `#include` line. A block's own `:flags` (unlike `:includes`, applied
+    unconditionally — not just for a `:main yes` wrap) is spliced into
+    the same `compile_commands.json` entry too, so e.g. clangd resolves
+    `-I/usr/include/gtk-3.0` the same way `mep.org.babel.execute` itself
+    just did to compile it. `mep.lsp` itself
     also appends a `--query-driver=...` flag to clangd's `cmd`, scoped to
     wherever `gcc`/`g++`/`cc`/`c++`/`clang`/`clang++` actually resolve on
     your own `PATH` — needed for clangd to discover the real compiler's

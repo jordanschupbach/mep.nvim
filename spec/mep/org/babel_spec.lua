@@ -679,6 +679,22 @@ describe('mep.org.babel', function()
       assert.are.equal(0, vim.fn.filereadable(binary_path))
     end)
 
+    it('appends :flags tokens to the compile command, after -o binary_path', function()
+      local buf = make_buf({
+        '#+begin_src c++ :flags -Wall -I/usr/include/gtk-3.0 -lgtk-3',
+        'int main() { return 0; }',
+        '#+end_src',
+      })
+      babel.execute(buf, 1)
+      local compile_call = calls[1]
+      local source_path, binary_path = compile_call.cmd[2], compile_call.cmd[4]
+      assert.are.same(
+        { 'g++', source_path, '-o', binary_path, '-Wall', '-I/usr/include/gtk-3.0', '-lgtk-3' },
+        compile_call.cmd
+      )
+      vim.fn.delete(source_path)
+    end)
+
     it('skips wrapping in main() when the block sets :main no', function()
       local buf = make_buf({
         '#+begin_src c++ :main no',
@@ -816,6 +832,27 @@ describe('mep.org.babel', function()
         '}',
       }, vim.fn.readfile(source_path))
       vim.fn.delete(source_path)
+    end)
+
+    it('appends :flags tokens (e.g. pasted-in pkg-config output) to the compile command', function()
+      local buf = make_buf({
+        '#+begin_src c :flags -I/usr/include/gtk-3.0 -lgtk-3',
+        'int main() { return 0; }',
+        '#+end_src',
+      })
+      babel.execute(buf, 1)
+      local compile_call = calls[1]
+      local source_path, binary_path = compile_call.cmd[2], compile_call.cmd[4]
+      assert.are.same({ 'gcc', source_path, '-o', binary_path, '-I/usr/include/gtk-3.0', '-lgtk-3' }, compile_call.cmd)
+      vim.fn.delete(source_path)
+    end)
+
+    it('with no :flags header arg, compiles exactly as before (no trailing empty tokens)', function()
+      local buf = make_buf({ '#+begin_src c', 'int main() { return 0; }', '#+end_src' })
+      babel.execute(buf, 1)
+      local compile_call = calls[1]
+      assert.are.same({ 'gcc', compile_call.cmd[2], '-o', compile_call.cmd[4] }, compile_call.cmd)
+      vim.fn.delete(compile_call.cmd[2])
     end)
   end)
 
@@ -1260,6 +1297,19 @@ describe('mep.org.babel', function()
 
       calls[1].opts.on_exit(100, 0)
       assert.are.same({ binary_path }, calls[2].cmd)
+    end)
+
+    it('splices :flags tokens between "go build" and "-o", ahead of -o/binary/source', function()
+      local buf = make_buf({ '#+begin_src go :main yes :flags -race', 'x := 1', '_ = x', '#+end_src' })
+      babel.execute(buf, 1)
+      local compile_call = calls[1]
+      assert.are.same({ 'go', 'build', '-race', '-o' }, {
+        compile_call.cmd[1],
+        compile_call.cmd[2],
+        compile_call.cmd[3],
+        compile_call.cmd[4],
+      })
+      vim.fn.delete(compile_call.cmd[6])
     end)
 
     it('wraps with an empty import block when there are no :includes', function()

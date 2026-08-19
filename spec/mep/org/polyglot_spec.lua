@@ -492,6 +492,19 @@ describe('mep.org.polyglot', function()
       assert.is_true(vim.tbl_contains(args, 'vector'))
     end)
 
+    it('splices :flags tokens into the compile_commands.json entry, regardless of :main', function()
+      local bufnr = buf({ '#+begin_src cpp :flags -Wall -I/usr/include/gtk-3.0', 'int a = 1;', '#+end_src' })
+      polyglot.setup_buffer(bufnr, { keymaps = {} })
+      local ctx = polyglot.context_at_cursor(bufnr, 2)
+      local shadow_path = vim.api.nvim_buf_get_name(ctx.shadow_bufnr)
+      local dir = vim.fn.fnamemodify(shadow_path, ':h')
+
+      polyglot.on_block_executed(bufnr, 2)
+
+      local decoded = vim.json.decode(table.concat(vim.fn.readfile(dir .. '/compile_commands.json'), '\n'))
+      assert.are.same({ 'g++', '-c', '-Wall', '-I/usr/include/gtk-3.0', shadow_path }, decoded[1].arguments)
+    end)
+
     it('does not add -include flags for a self-contained (:main no / default) block, even with :includes set', function()
       local bufnr = buf({ '#+begin_src cpp :includes <iostream>', '#include <iostream>', 'int main() { return 0; }', '#+end_src' })
       polyglot.setup_buffer(bufnr, { keymaps = {} })

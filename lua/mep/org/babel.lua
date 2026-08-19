@@ -30,14 +30,19 @@
 --- compiled to a temp binary, then that binary is run — two chained
 --- `core.job.spawn` calls instead of the one an interpreted language
 --- needs. The actual compile invocation is `{ exe, source_path, '-o',
---- binary_path }` (matching gcc/g++/rustc's shared flag shape) unless
---- the language def supplies its own `compile_cmd(exe, source_path,
---- binary_path)` — Go needs one, since `go build`'s subcommand comes
---- before its flags; Java needs one too, since `javac -d <dir>` doesn't
+--- binary_path, ...flags }` (matching gcc/g++/rustc's shared flag shape,
+--- `flags` being each whitespace-separated token of the `:flags`
+--- header-arg — e.g. the output of running `pkg-config --cflags --libs
+--- <pkg>` yourself and pasting it in) unless the language def supplies
+--- its own `compile_cmd(exe, source_path, binary_path, class_name,
+--- flags)` — Go needs one, since `go build`'s subcommand comes before
+--- its flags; Java needs one too, since `javac -d <dir>` doesn't
 --- produce a single executable at all (`binary_path` is reused as a
 --- *directory* of `.class` files instead — see `run_compiled_cmd`
---- below). A failed compile reports the compiler's stderr the same way
---- a failed run reports the program's.
+--- below); D needs one for its own `-of=<path>` output-flag spelling.
+--- All three still splice `flags` in somewhere sensible rather than
+--- dropping them. A failed compile reports the compiler's stderr the
+--- same way a failed run reports the program's.
 ---
 --- The run step after a successful compile is `{ binary_path }` (just
 --- exec it directly) unless the language def supplies its own
@@ -48,6 +53,19 @@
 --- file, so cleanup uses a recursive delete for it specifically (every
 --- other compiled language's `binary_path` stays a single file, deleted
 --- the same way it always has been).
+---
+--- `:flags` (compiled languages only, no real org-babel equivalent —
+--- closest is a `:flags` you might pass through `:cmdline`/a session's
+--- own compiler invocation, but this project has neither) is a
+--- whitespace-separated list of extra tokens appended verbatim to the
+--- compile command, e.g. `:flags -Wall -I/usr/include/gtk-3.0 -lgtk-3`
+--- — the typical use is pasting in whatever `pkg-config --cflags --libs
+--- <pkg>` printed, since this project doesn't itself shell out to
+--- `pkg-config` (same "you already have a shell for that" boundary
+--- `:includes` draws: this parses and forwards a string, it doesn't
+--- interpret one). Order relative to `-o binary_path`/the source file
+--- is whatever each language's own `compile_cmd` does with them (see
+--- above); a missing `:flags` behaves exactly as before this existed.
 ---
 --- `:main` (real org-babel-C's own header-arg name) controls the
 --- entry-point wrap and defaults to *not* wrapping: a block's body is
@@ -64,7 +82,8 @@
 --- Explicitly deferred, likely indefinitely (see ORGMODE_ROADMAP.md):
 --- persistent per-block sessions, and the rest of real org-babel's large
 --- header-argument surface (`:session`, `:noweb`, etc.) beyond
---- `:results`, `:var`, `:cache`, and (C/C++ only) `:includes`.
+--- `:results`, `:var`, `:cache`, (C/C++ only) `:includes`, and (compiled
+--- languages only) `:flags`.
 ---
 --- `:cache yes` (opt-in — a plain `#+begin_src` block with no `:cache`
 --- always re-executes, matching real org-babel's own default): `M.
@@ -570,8 +589,11 @@ M.languages = {
     -- `go build`'s subcommand has to come before its `-o` flag, unlike
     -- gcc/g++/rustc's shared `<src> -o <bin>` shape — see `compile_cmd`'s
     -- default fallback in `execute` below.
-    compile_cmd = function(exe, source_path, binary_path)
-      return { exe, 'build', '-o', binary_path, source_path }
+    compile_cmd = function(exe, source_path, binary_path, _class_name, flags)
+      local cmd = { exe, 'build' }
+      vim.list_extend(cmd, flags)
+      vim.list_extend(cmd, { '-o', binary_path, source_path })
+      return cmd
     end,
     var_stmt = function(name, literal)
       return string.format('%s := %s', name, literal)
@@ -753,10 +775,13 @@ M.languages = {
     extension = '.java',
     compiled = true,
     detect_class = java_class_name,
-    compile_cmd = function(exe, source_path, binary_path, class_name)
+    compile_cmd = function(exe, source_path, binary_path, class_name, flags)
       local named_path = vim.fn.fnamemodify(source_path, ':h') .. '/' .. class_name .. '.java'
       vim.fn.writefile(vim.fn.readfile(source_path), named_path)
-      return { exe, '-d', binary_path, named_path }
+      local cmd = { exe, '-d', binary_path }
+      vim.list_extend(cmd, flags)
+      cmd[#cmd + 1] = named_path
+      return cmd
     end,
     run_compiled_cmd = function(binary_path, class_name)
       return { 'java', '-cp', binary_path, class_name }
@@ -838,10 +863,12 @@ M.languages = {
     -- copy instead of the original — `execute`'s own post-compile
     -- cleanup only ever deletes `source_path`, so (same as the Nim
     -- case) this one extra small text file is left behind.
-    compile_cmd = function(exe, source_path, binary_path)
+    compile_cmd = function(exe, source_path, binary_path, _class_name, flags)
       local valid_path = vim.fn.fnamemodify(source_path, ':h') .. '/m' .. vim.fn.fnamemodify(source_path, ':t')
       vim.fn.writefile(vim.fn.readfile(source_path), valid_path)
-      return { exe, valid_path, '-of=' .. binary_path }
+      local cmd = { exe, valid_path, '-of=' .. binary_path }
+      vim.list_extend(cmd, flags)
+      return cmd
     end,
     var_stmt = function(name, literal)
       return string.format('auto %s = %s;', name, literal)
@@ -1207,9 +1234,23 @@ local function spawn_script(lang_def, exe, script_lines, args, on_finish)
     -- hooks take a fixed, smaller argument list and simply ignore this
     -- extra trailing one.
     local class_name = args.classname or (lang_def.detect_class and lang_def.detect_class(script_lines))
+    -- `:flags`, tokenized the same whitespace-split way `:includes` is
+    -- (see `prepare_script`) — the typical value is whatever `pkg-config
+    -- --cflags --libs <pkg>` printed, pasted in by hand.
+    local flags = {}
+    if args.flags then
+      for token in args.flags:gmatch('%S+') do
+        flags[#flags + 1] = token
+      end
+    end
     local compile_stderr = {}
-    local compile_cmd = lang_def.compile_cmd and lang_def.compile_cmd(exe, source_path, binary_path, class_name)
-      or { exe, source_path, '-o', binary_path }
+    local compile_cmd
+    if lang_def.compile_cmd then
+      compile_cmd = lang_def.compile_cmd(exe, source_path, binary_path, class_name, flags)
+    else
+      compile_cmd = { exe, source_path, '-o', binary_path }
+      vim.list_extend(compile_cmd, flags)
+    end
     core.job.spawn({
       cmd = compile_cmd,
       on_stderr = function(line)
