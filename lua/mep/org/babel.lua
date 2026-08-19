@@ -54,18 +54,26 @@
 --- other compiled language's `binary_path` stays a single file, deleted
 --- the same way it always has been).
 ---
---- `:flags` (compiled languages only, no real org-babel equivalent —
---- closest is a `:flags` you might pass through `:cmdline`/a session's
---- own compiler invocation, but this project has neither) is a
---- whitespace-separated list of extra tokens appended verbatim to the
---- compile command, e.g. `:flags -Wall -I/usr/include/gtk-3.0 -lgtk-3`
---- — the typical use is pasting in whatever `pkg-config --cflags --libs
---- <pkg>` printed, since this project doesn't itself shell out to
---- `pkg-config` (same "you already have a shell for that" boundary
---- `:includes` draws: this parses and forwards a string, it doesn't
---- interpret one). Order relative to `-o binary_path`/the source file
---- is whatever each language's own `compile_cmd` does with them (see
---- above); a missing `:flags` behaves exactly as before this existed.
+--- `:flags` (compiled languages only, real org-babel-C's own header-arg
+--- name) is extra tokens appended to the compile command, e.g. `:flags
+--- -Wall -I/usr/include/gtk-3.0 -lgtk-3`. Unlike `:includes` (plain
+--- whitespace-splitting, no shell involved), `:flags` is expanded by a
+--- real `sh` (`M.expand_flags`) before use — command substitution
+--- (`` :flags $(pkg-config --cflags --libs foo) ``) and quoting both
+--- work exactly as they would typed at a shell prompt, matching real
+--- org-babel-C's own behavior of running the whole compile invocation
+--- through a shell rather than parsing `:flags` itself. This is a
+--- deliberate, scoped trust boundary: `:flags`' text runs as real shell
+--- code on every execution of the block, same as the block's own body
+--- already runs as real compiled/interpreted code — not a new privilege
+--- a `#+begin_src` block didn't already have. `pkg-config` failing (not
+--- installed, package not found) degrades to an empty flag list rather
+--- than erroring `:flags` itself; the compile then fails with the
+--- compiler's own diagnostic, the same as an unresolved `:includes`
+--- token already does. Order relative to `-o binary_path`/the source
+--- file is whatever each language's own `compile_cmd` does with the
+--- expanded token list (see above); a missing `:flags` behaves exactly
+--- as before this existed.
 ---
 --- `:main` (real org-babel-C's own header-arg name) controls the
 --- entry-point wrap and defaults to *not* wrapping: a block's body is
@@ -932,6 +940,43 @@ function M.resolve_executable(lang_def)
   return nil
 end
 
+--- Expands `flags_str` (a raw `:flags` header-arg value, e.g. `"$(pkg-
+--- config --cflags --libs datamunge)"`) into a list of literal compiler
+--- argv tokens by handing it to a real `sh` — command substitution,
+--- quoting, and word-splitting all behave exactly as they would typed
+--- at a shell prompt, matching real org-babel-C's own approach of
+--- building the whole compile invocation as one shell command line
+--- rather than parsing `:flags` itself (see `M.languages`' own header
+--- comment above for the full rationale/trust-boundary note). `set -f`
+--- disables pathname expansion (a bare `*` in a flag shouldn't glob
+--- local files) — word-splitting and `$(...)`/backtick/`${...}`
+--- substitution still apply. Each resulting word is printed on its own
+--- line (via `vim.fn.systemlist`, one list entry per line) so this
+--- doesn't have to re-guess word boundaries in output that may itself
+--- contain spaces (e.g. an expanded `-DMSG=hello world`) — NUL would be
+--- the fully general separator, but Vim's C-string-backed `system()`
+--- silently drops embedded NULs from a command's output rather than
+--- preserving them (confirmed empirically), and a literal newline
+--- inside a single compiler flag is not a real-world case worth
+--- designing around. No `sh` on PATH, a shell syntax error, or a
+--- failing substitution (`pkg-config` not installed, package not found
+--- — a command substitution's own exit status is invisible to the `for`
+--- loop around it, by POSIX shell design) all degrade to an empty flag
+--- list rather than raising here; the compile itself then fails with
+--- the compiler's own diagnostic, the same as an unresolved `:includes`
+--- token already does.
+function M.expand_flags(flags_str)
+  if not flags_str or flags_str == '' then
+    return {}
+  end
+  local script = 'set -f; for __mep_flag in ' .. flags_str .. '; do printf "%s\\n" "$__mep_flag"; done'
+  local ok, output = pcall(vim.fn.systemlist, { 'sh', '-c', script })
+  if not ok or type(output) ~= 'table' or vim.v.shell_error ~= 0 then
+    return {}
+  end
+  return output
+end
+
 local BEGIN_PATTERN = '^%s*#%+[Bb][Ee][Gg][Ii][Nn]_[Ss][Rr][Cc]%s*(%S*)%s*(.-)%s*$'
 local END_PATTERN = '^%s*#%+[Ee][Nn][Dd]_[Ss][Rr][Cc]%s*$'
 local RESULTS_PATTERN = '^%s*#%+[Rr][Ee][Ss][Uu][Ll][Tt][Ss]:%s*$'
@@ -1234,15 +1279,7 @@ local function spawn_script(lang_def, exe, script_lines, args, on_finish)
     -- hooks take a fixed, smaller argument list and simply ignore this
     -- extra trailing one.
     local class_name = args.classname or (lang_def.detect_class and lang_def.detect_class(script_lines))
-    -- `:flags`, tokenized the same whitespace-split way `:includes` is
-    -- (see `prepare_script`) — the typical value is whatever `pkg-config
-    -- --cflags --libs <pkg>` printed, pasted in by hand.
-    local flags = {}
-    if args.flags then
-      for token in args.flags:gmatch('%S+') do
-        flags[#flags + 1] = token
-      end
-    end
+    local flags = M.expand_flags(args.flags)
     local compile_stderr = {}
     local compile_cmd
     if lang_def.compile_cmd then

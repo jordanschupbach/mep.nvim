@@ -1171,15 +1171,19 @@ structure editing below works immediately, even before (or without) the
   that's the common case for something worth pasting into a src block
   (see `mep.org.polyglot`'s own section above for the identical `:main`
   contract its shadow buffers use). Also for a compiled language,
-  `:flags` (whitespace-separated, e.g. `:flags -Wall $(pkg-config
-  --cflags --libs gtk+-3.0)` typed out as its already-expanded tokens —
-  this project doesn't shell out to `pkg-config` itself, `:flags` just
-  forwards whatever string you give it) is appended to the compile
-  invocation, so C/C++ blocks can link against a library found via
-  `pkg-config --cflags --libs <pkg>` (or any other extra `-I`/`-D`/`-l`
-  flags) without needing a session or a Makefile; `mep.org.polyglot`
-  also feeds `:flags` into a c/cpp block's own `compile_commands.json`
-  (alongside `:includes`) so clangd's diagnostics agree with what
+  `:flags` (e.g. `:flags $(pkg-config --cflags --libs gtk+-3.0)`) is
+  appended to the compile invocation, so C/C++ blocks can link against a
+  library found via `pkg-config` (or take any other extra `-I`/`-D`/`-l`
+  flags) without needing a session or a Makefile. `:flags` is expanded
+  by a real `sh` rather than just whitespace-split (`mep.org.babel.
+  expand_flags`) — command substitution and quoting both work exactly
+  as they would at a shell prompt, matching real org-babel-C's own
+  behavior of running the whole compile invocation through a shell; a
+  failing substitution (`pkg-config` not installed, package not found)
+  degrades to no extra flags rather than erroring, so the compiler's own
+  diagnostic is what actually surfaces. `mep.org.polyglot` also feeds
+  the same expanded `:flags` into a c/cpp block's own `compile_commands.
+  json` (alongside `:includes`) so clangd's diagnostics agree with what
   `<C-c>e` actually compiles. A failed run still writes whatever
   stdout it produced and separately warns with the first substantive
   line of stderr — skipping a leading `# <package>` header `go build`

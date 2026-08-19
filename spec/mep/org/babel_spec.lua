@@ -87,6 +87,37 @@ describe('mep.org.babel', function()
     end)
   end)
 
+  describe('expand_flags', function()
+    it('returns an empty list for nil or the empty string', function()
+      assert.are.same({}, babel.expand_flags(nil))
+      assert.are.same({}, babel.expand_flags(''))
+    end)
+
+    it('whitespace-splits plain flags with no shell syntax', function()
+      assert.are.same({ '-Wall', '-I/usr/include/gtk-3.0', '-lgtk-3' }, babel.expand_flags('-Wall -I/usr/include/gtk-3.0 -lgtk-3'))
+    end)
+
+    it('expands $(...) command substitution, e.g. standing in for `pkg-config --cflags --libs`', function()
+      assert.are.same({ '-DFOO', '-DBAR' }, babel.expand_flags('$(printf -- "-DFOO -DBAR")'))
+    end)
+
+    it('honors quoting, keeping a quoted space inside one token', function()
+      assert.are.same({ '-DMSG=hello world' }, babel.expand_flags('-DMSG="hello world"'))
+    end)
+
+    it('does not glob a bare * in a flag', function()
+      assert.are.same({ '-DPATTERN=*.c' }, babel.expand_flags('-DPATTERN=*.c'))
+    end)
+
+    it('degrades to an empty list on a shell syntax error rather than raising', function()
+      assert.are.same({}, babel.expand_flags('"unterminated'))
+    end)
+
+    it('degrades to an empty list when a command substitution fails (e.g. a missing pkg-config)', function()
+      assert.are.same({}, babel.expand_flags('$(command -v mep-nonexistent-pkg-config-stand-in)'))
+    end)
+  end)
+
   describe('render_results / insert_or_update_results', function()
     it('renders empty output as a bare #+RESULTS: line', function()
       assert.are.same({ '#+RESULTS:' }, babel.render_results({}))
@@ -692,6 +723,19 @@ describe('mep.org.babel', function()
         { 'g++', source_path, '-o', binary_path, '-Wall', '-I/usr/include/gtk-3.0', '-lgtk-3' },
         compile_call.cmd
       )
+      vim.fn.delete(source_path)
+    end)
+
+    it('shell-expands $(...) command substitution in :flags, e.g. standing in for pkg-config output', function()
+      local buf = make_buf({
+        '#+begin_src c++ :flags $(printf -- "-DFOO -DBAR")',
+        'int main() { return 0; }',
+        '#+end_src',
+      })
+      babel.execute(buf, 1)
+      local compile_call = calls[1]
+      local source_path, binary_path = compile_call.cmd[2], compile_call.cmd[4]
+      assert.are.same({ 'g++', source_path, '-o', binary_path, '-DFOO', '-DBAR' }, compile_call.cmd)
       vim.fn.delete(source_path)
     end)
 

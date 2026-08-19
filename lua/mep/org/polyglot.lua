@@ -630,22 +630,17 @@ local function forced_include_args(ft, hargs)
   return args
 end
 
---- `hargs.flags`'s own whitespace-separated tokens (e.g. `pkg-config
---- --cflags --libs <pkg>` output pasted into `:flags`), unlike `:includes`
---- above not gated on `should_wrap_main` — these are ordinary compiler
---- flags (`-I`, `-D`, `-l`, ...) that apply to a block's compile
---- invocation regardless of whether it's a self-contained program or a
---- wrapped snippet, so clangd needs them either way to resolve the same
---- headers/symbols `mep.org.babel.execute` actually compiles against.
+--- `hargs.flags`, shell-expanded by `babel.expand_flags` (e.g. `:flags
+--- $(pkg-config --cflags --libs <pkg>)`) the exact same way `mep.org.
+--- babel.execute` itself expands it to actually compile — unlike
+--- `:includes` above, not gated on `should_wrap_main`: these are
+--- ordinary compiler flags (`-I`, `-D`, `-l`, ...) that apply to a
+--- block's compile invocation regardless of whether it's a self-
+--- contained program or a wrapped snippet, so clangd needs them either
+--- way to resolve the same headers/symbols `babel.execute` compiles
+--- against.
 local function forced_flag_args(hargs)
-  local args = {}
-  if not hargs.flags then
-    return args
-  end
-  for token in hargs.flags:gmatch('%S+') do
-    args[#args + 1] = token
-  end
-  return args
+  return babel.expand_flags(hargs.flags)
 end
 
 --- Called after `mep.org.babel.execute` finishes running the src block at
